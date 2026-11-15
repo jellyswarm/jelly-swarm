@@ -22,12 +22,19 @@ comments point there.
 | `packages/checker` | Row checks against sources, the judge, signed verdict and rows root |
 | `packages/merger` | Result table (CSV, Markdown, JSON) and the cited summary |
 | `packages/queues` | BullMQ queue names, defaults and deterministic row job ids |
+| `packages/x402` | Pay-per-request over HTTP: payment requirements, EIP-3009 facilitator, replay guard |
+| `packages/service` | Job lifecycle behind every interface: quote → fund → run → merge → seal → settle |
+| `packages/settlement` | Audit sampling, volume classification, the settlement-keeper, `/stats` |
 | `contracts` | Solidity (Foundry): escrow, row split, vault, forwarder, fees, burn, operators |
+| `apps/api` | REST /v1, x402 routes, tRPC, `/stats`, agent-card and x402 discovery documents |
+| `apps/mcp` | The six `swarm_*` MCP tools, over stdio and streamable HTTP |
+| `apps/keeper` | Runs the settlement-keeper on an interval |
+| `apps/meter` | Runs the daily volume classifier |
 | `tools/copy-lint` | Fails the build on banned wording in user-facing strings |
 | `docs/day1.md` | Facts that must be verified before launch |
 | `docs/in-repo-core.md` | Pieces written here that the build doc expected to import |
 
-`apps/`, `contracts/` and `programs/` are added phase by phase.
+`programs/` is added in a later phase.
 
 ## Run it
 

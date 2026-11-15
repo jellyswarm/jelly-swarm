@@ -21,7 +21,7 @@ real funds.
 | Fee router | `contracts/src/Fees.sol` | 4 |
 | Checker panels (stake, audit and dispute rounds) | `CheckerNet` in `contracts/src/Checkers.sol` (first version; panel draw and voting rules are ours) | 4 |
 | Admin timelock (48h) and guardian halt | `contracts/src/Admin.sol` | 4 |
-| x402 facilitator fork | `apps/x402-facilitator` | 5 |
+| x402 facilitator fork | `packages/x402` (own-key EVM facilitator plus an HTTP fallback, not a fork) | 5 |
 | Chain indexer | `apps/indexer` | 6 |
 | Volume classifier (3-hop rule) | `apps/meter` | 6 |
 | ACP v2 payee mode | deferred until the live ABI is confirmed (day-1 check 3) | — |

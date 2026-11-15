@@ -17,6 +17,14 @@
     { "path": "packages/service" },
     { "path": "apps/api" },
     { "path": "apps/mcp" },
+    { "path": "packages/settlement" },
+    { "path": "packages/auth" },
+    { "path": "packages/abuse" },
+    { "path": "packages/templates" },
+    { "path": "apps/intake" },
+    { "path": "packages/live" },
+    { "path": "apps/keeper" },
+    { "path": "apps/meter" },
     { "path": "tools/copy-lint" }
   ]
 }

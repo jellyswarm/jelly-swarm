@@ -15,6 +15,7 @@ import {
   settlementAmounts,
   verifyQuote,
 } from "@jelly/engine";
+import { type EventBus, TileCoalescer } from "@jelly/live";
 import { type Merger, toCsv, toJson, toMarkdown } from "@jelly/merger";
 import { type ReceiptChain, merkleProof } from "@jelly/receipts";
 import { ChainKey, DISPUTE_FEE_BPS, DISPUTE_MAX_ROWS, DISPUTE_MIN_FEE_USD6, MAX_AGENTS, Product, Tier, formatUsd6 } from "@jelly/shared";
@@ -98,6 +99,8 @@ export type ServiceDeps = {
   receipts: ReceiptChain;
   store: JobStore;
   escrow: Escrow;
+  /** §11.2 fan-out for live subscribers (SSE/WebSocket). Every emitted event is also persisted via `store.appendEvent`. */
+  bus: EventBus;
   verdictSigner: VerdictSigner;
   /** The operator credited for a host's work. Until outside operators exist, every host is ours. */
   operatorOf?: (hostId: string) => bigint;
@@ -121,11 +124,40 @@ export class JobService {
   private readonly engine: Engine;
   private readonly now: () => number;
   private readonly tiles = new Map<string, Map<number, string>>();
+  private readonly liveTiles = new Map<Hex, TileCoalescer>();
+  private readonly lastBatchMs = new Map<Hex, number>();
+  private readonly runningLane = new Map<Hex, StoredJob["lane"]>();
   private readonly runs = new Map<Hex, Promise<void>>();
 
   constructor(private readonly deps: ServiceDeps) {
     this.now = deps.now ?? Date.now;
     this.engine = deps.makeEngine((e) => this.onEngineEvent(e));
+  }
+
+  /** Persists an event and fans it out to live subscribers, in that order so the bus carries the real sequence number. */
+  private async emit(jobKey: Hex, type: string, payload: unknown): Promise<void> {
+    const event = await this.deps.store.appendEvent(jobKey, type, payload);
+    this.deps.bus.publish(jobKey, event);
+  }
+
+  private tileCoalescerFor(jobKey: Hex): TileCoalescer {
+    let c = this.liveTiles.get(jobKey);
+    if (!c) {
+      c = new TileCoalescer(10, this.now);
+      this.liveTiles.set(jobKey, c);
+    }
+    return c;
+  }
+
+  private async emitEta(jobKey: Hex, lane: StoredJob["lane"]): Promise<void> {
+    const { etaSec } = this.engine.scheduler.admission(lane);
+    await this.emit(jobKey, "eta", { sec: etaSec });
+  }
+
+  private async emitCost(jobKey: Hex, quoteUsd6: bigint): Promise<void> {
+    if (!this.deps.spentMicros) return;
+    const spent = await this.deps.spentMicros(jobKey).catch(() => undefined);
+    if (spent !== undefined) await this.emit(jobKey, "cost", { spentUsd: formatUsd6(spent), quoteUsd: formatUsd6(quoteUsd6) });
   }
 
   // ───────────────────────── quote ─────────────────────────
@@ -249,7 +281,7 @@ export class JobService {
         ...(payer ? { payer } : {}),
       };
       await this.deps.store.putJob(job);
-      await this.deps.store.appendEvent(jobKey, "job.quoted", {
+      await this.emit(jobKey, "job.quoted", {
         agents: quote.lines.agents,
         of: MAX_AGENTS,
         priceUsd: formatUsd6(quote.lines.totalUsd6),
@@ -305,7 +337,8 @@ export class JobService {
 
   private async start(job: StoredJob): Promise<StoredJob> {
     const running = await this.deps.store.updateJob(job.jobKey, { state: "running" });
-    await this.deps.store.appendEvent(job.jobKey, "job.funded", { route: job.route, chain: job.chain });
+    await this.emit(job.jobKey, "job.funded", { route: job.route, chain: job.chain });
+    await this.emitEta(job.jobKey, job.lane);
     const run = this.execute(running).catch(() => {});
     this.runs.set(job.jobKey, run);
     return running;
@@ -320,6 +353,7 @@ export class JobService {
 
   private async execute(job: StoredJob): Promise<void> {
     const { store, escrow, receipts } = this.deps;
+    this.runningLane.set(job.jobKey, job.lane);
     try {
       const engineJob: EngineJob = {
         spec: job.spec,
@@ -342,15 +376,16 @@ export class JobService {
 
       const passed = result.rows.flatMap((r) => (r.state === "passed" && r.cells ? [{ rowIdx: r.rowIdx, cells: r.cells }] : []));
       const merged = await this.deps.merger.merge(engineJob, passed);
-      await store.appendEvent(job.jobKey, "job.merged", {
+      await this.emit(job.jobKey, "job.merged", {
         passed: result.passed,
         refunded: result.refunded,
         unverifiedCells: merged.table.unverifiedCells,
       });
+      await this.emitCost(job.jobKey, job.lines.totalUsd6);
 
       const seal = await receipts.seal(job.jobKey);
       const sealTx = (await escrow.seal(job.jobKey, seal)).tx;
-      await store.appendEvent(job.jobKey, "job.sealed", { root: seal.root, tx: sealTx });
+      await this.emit(job.jobKey, "job.sealed", { root: seal.root, tx: sealTx });
 
       const amounts = settlementAmounts(job.lines, result.passed, result.toolsUsd6);
       const operatorOf = this.deps.operatorOf ?? (() => this.deps.workerOperatorId ?? 1n);
@@ -376,36 +411,54 @@ export class JobService {
         seal,
         sealTx,
         settleTx: settled.tx,
+        settledAtMs: this.now(),
         releaseAtSec: settled.releaseAtSec,
         amounts,
       });
-      await store.appendEvent(job.jobKey, "job.settled", {
+      await this.emit(job.jobKey, "job.settled", {
         paidUsd: formatUsd6(amounts.grossUsd6 + amounts.toolsBilledUsd6),
         refundedUsd: formatUsd6(amounts.refundUsd6),
         tx: settled.tx,
       });
+      await this.emitCost(job.jobKey, job.lines.totalUsd6);
     } catch {
       // The detail stays in our logs. On-chain the job is still funded, so the
       // payer gets everything back through the expiry refund.
       await store.updateJob(job.jobKey, { state: "failed", error: COPY.runFailed }).catch(() => {});
-      await store.appendEvent(job.jobKey, "job.failed", {}).catch(() => {});
+      await this.emit(job.jobKey, "job.failed", {}).catch(() => {});
     } finally {
       this.tiles.delete(job.jobKey);
+      this.liveTiles.delete(job.jobKey);
+      this.lastBatchMs.delete(job.jobKey);
+      this.runningLane.delete(job.jobKey);
     }
   }
 
   private onEngineEvent(e: EngineEvent): void {
     const jobKey = e.jobKey as Hex;
     if (e.type === "tile") {
+      // The row-state tally behind StatusView.tiles (counts by state, not by agent).
       let rows = this.tiles.get(jobKey);
       if (!rows) {
         rows = new Map();
         this.tiles.set(jobKey, rows);
       }
       rows.set(e.rowIdx, e.state);
-      return; // tile changes are summarised in status; streaming them is Phase 7
+
+      // §11.2 the live per-agent grid: throttled individual tiles, plus a periodic full snapshot.
+      const coalescer = this.tileCoalescerFor(jobKey);
+      const allowed = coalescer.record(e.agentIdx, e.state);
+      if (allowed) void this.emit(jobKey, "tile", { agentIdx: e.agentIdx, rowIdx: e.rowIdx, state: e.state }).catch(() => {});
+      const lastBatch = this.lastBatchMs.get(jobKey) ?? 0;
+      if (this.now() - lastBatch >= 100) {
+        this.lastBatchMs.set(jobKey, this.now());
+        void this.emit(jobKey, "tiles.batch", { states: coalescer.snapshotBase64() }).catch(() => {});
+      }
+      return;
     }
-    void this.deps.store.appendEvent(jobKey, e.type, { wave: e.wave, rows: e.rows }).catch(() => {});
+    void this.emit(jobKey, e.type, { wave: e.wave, rows: e.rows }).catch(() => {});
+    const lane = this.runningLane.get(jobKey);
+    if (lane) void this.emitEta(jobKey, lane).catch(() => {});
   }
 
   // ───────────────────────── read ─────────────────────────
@@ -541,8 +594,6 @@ export class JobService {
       createdAtMs: this.now(),
     });
 
-    const leaves = job.verdict.rows.map((r) => r.rowIdx);
-    void leaves;
     const built = buildVerdict({
       jobKey,
       rows: job.verdict.rows.map((r) => ({ rowIdx: r.rowIdx, passed: r.passed, operatorId: r.operatorId })),
@@ -564,25 +615,33 @@ export class JobService {
     });
   }
 
-  // ───────────────────────── API keys ─────────────────────────
+  // ───────────────────────── access keys ─────────────────────────
+
+  private async mintKey(accountId: string, owner: string, active: boolean): Promise<{ keyId: string; secret: string }> {
+    const keyId = `jk_${randomBytes(6).toString("hex")}`;
+    const secret = `${keyId}.${randomBytes(24).toString("base64url")}`;
+    await this.deps.store.putApiKey({ keyId, secretHash: hashSecret(secret), accountId, owner, active, createdAtMs: this.now() });
+    return { keyId, secret };
+  }
 
   /**
    * Issues a wallet-bound API key (§9.2). The secret is returned once and only
-   * its hash is kept. The key cannot spend until the owner signs a spend
-   * grant; its caps live in that grant, on-chain, not here.
+   * its hash is kept. The key's account is its own: naming a wallet here proves
+   * nothing, so it must never give access to that wallet's other jobs. The key
+   * cannot spend until the owner signs a spend grant; its caps live in that
+   * grant, on-chain, not here.
    */
-  async issueKey(owner: Address): Promise<{ keyId: string; secret: string }> {
-    const keyId = `jk_${randomBytes(6).toString("hex")}`;
-    const secret = `${keyId}.${randomBytes(24).toString("base64url")}`;
-    await this.deps.store.putApiKey({
-      keyId,
-      secretHash: hashSecret(secret),
-      accountId: `wallet:${owner.toLowerCase()}`,
-      owner,
-      active: false,
-      createdAtMs: this.now(),
-    });
-    return { keyId, secret };
+  issueKey(owner: Address): Promise<{ keyId: string; secret: string }> {
+    return this.mintKey(`key:${randomUUID()}`, owner, false);
+  }
+
+  /**
+   * An access key for a caller with no account, so they can read back the
+   * quotes and jobs they create. It carries no spending power. Sign-in,
+   * proof-of-work and rate limits for this path arrive in Phase 7.
+   */
+  issueAnonymousKey(): Promise<{ keyId: string; secret: string }> {
+    return this.mintKey(`anon:${randomUUID()}`, "", true);
   }
 
   /** The account a key belongs to, or null if the key is unknown. */

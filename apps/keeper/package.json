@@ -1,0 +1,14 @@
+{
+  "name": "@jelly/keeper",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@jelly/service": "workspace:*",
+    "@jelly/settlement": "workspace:*",
+    "@jelly/shared": "workspace:*"
+  }
+}

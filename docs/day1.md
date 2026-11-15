@@ -46,3 +46,11 @@ Status: `open` = not checked yet, `confirmed` = checked (add the evidence),
 | 13 | SMTP relay for email links | open | |
 | 14 | Telegram bot token | open | |
 | 15 | Onramp list (user-chosen links only) | open | |
+
+## Settlement and stats
+
+| # | Check | Status | Result |
+|---|---|---|---|
+| 16 | Kill-switch drill on solana-test-validator (the EVM half runs as `contracts/test/KillSwitchDrill.t.sol`) | open | Needs `programs/jelly_sol` (Phase 8) first. |
+| 17 | Real chain indexer for the volume classifier's funding graph (`@jelly/settlement`'s `FundingGraph`); `MemoryFundingGraph` and `NullFundingGraph` are stand-ins | open | Until built, production should run `NullFundingGraph`, which never over-classifies a job as internal. |
+| 18 | Burn bucket feed for `/stats`'s `burns` list (today it is whatever the deployment passes in; nothing reads `BurnBucket.Burned` events yet) | open | |

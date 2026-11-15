@@ -23,15 +23,15 @@ importers:
       '@jelly/engine':
         specifier: workspace:*
         version: link:../../packages/engine
-      '@jelly/service':
+      '@jelly/live':
         specifier: workspace:*
-        version: link:../../packages/service
+        version: link:../../packages/live
+      '@jelly/settlement':
+        specifier: workspace:*
+        version: link:../../packages/settlement
       '@jelly/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      '@jelly/x402':
-        specifier: workspace:*
-        version: link:../../packages/x402
       '@trpc/server':
         specifier: ^11.28.2
         version: 11.28.2(typescript@7.0.2)
@@ -44,6 +44,33 @@ importers:
       zod:
         specifier: ^4.6.7
         version: 4.6.7
+    devDependencies:
+      '@jelly/checker':
+        specifier: workspace:*
+        version: link:../../packages/checker
+      '@jelly/service':
+        specifier: workspace:*
+        version: link:../../packages/service
+      '@jelly/x402':
+        specifier: workspace:*
+        version: link:../../packages/x402
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.32.2
+        version: 1.32.2(zod@4.6.7)
+
+  apps/intake: {}
+
+  apps/keeper:
+    dependencies:
+      '@jelly/service':
+        specifier: workspace:*
+        version: link:../../packages/service
+      '@jelly/settlement':
+        specifier: workspace:*
+        version: link:../../packages/settlement
+      '@jelly/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
 
   apps/mcp:
     dependencies:
@@ -56,6 +83,29 @@ importers:
       zod:
         specifier: ^4.6.7
         version: 4.6.7
+    devDependencies:
+      '@jelly/service':
+        specifier: workspace:*
+        version: link:../../packages/service
+      viem:
+        specifier: ^2.57.20
+        version: 2.57.20(typescript@7.0.2)(zod@4.6.7)
+
+  apps/meter:
+    dependencies:
+      '@jelly/service':
+        specifier: workspace:*
+        version: link:../../packages/service
+      '@jelly/settlement':
+        specifier: workspace:*
+        version: link:../../packages/settlement
+      '@jelly/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+
+  packages/abuse: {}
+
+  packages/auth: {}
 
   packages/budget-guard:
     dependencies:
@@ -167,6 +217,18 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
 
+  packages/live:
+    dependencies:
+      '@jelly/shared':
+        specifier: workspace:*
+        version: link:../shared
+      viem:
+        specifier: ^2.57.20
+        version: 2.57.20(typescript@7.0.2)(zod@4.6.7)
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+
   packages/merger:
     dependencies:
       '@jelly/checker':
@@ -230,15 +292,15 @@ importers:
       '@jelly/budget-guard':
         specifier: workspace:*
         version: link:../budget-guard
-      '@jelly/checker':
-        specifier: workspace:*
-        version: link:../checker
       '@jelly/engine':
         specifier: workspace:*
         version: link:../engine
       '@jelly/gateway':
         specifier: workspace:*
         version: link:../gateway
+      '@jelly/live':
+        specifier: workspace:*
+        version: link:../live
       '@jelly/merger':
         specifier: workspace:*
         version: link:../merger
@@ -258,6 +320,9 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
     devDependencies:
+      '@jelly/checker':
+        specifier: workspace:*
+        version: link:../checker
       '@jelly/fetcher':
         specifier: workspace:*
         version: link:../fetcher
@@ -265,11 +330,35 @@ importers:
         specifier: workspace:*
         version: link:../tools
 
+  packages/settlement:
+    dependencies:
+      '@jelly/receipts':
+        specifier: workspace:*
+        version: link:../receipts
+      '@jelly/service':
+        specifier: workspace:*
+        version: link:../service
+      '@jelly/shared':
+        specifier: workspace:*
+        version: link:../shared
+      viem:
+        specifier: ^2.57.20
+        version: 2.57.20(typescript@7.0.2)(zod@4.6.7)
+    devDependencies:
+      '@jelly/checker':
+        specifier: workspace:*
+        version: link:../checker
+      '@jelly/engine':
+        specifier: workspace:*
+        version: link:../engine
+
   packages/shared:
     dependencies:
       zod:
         specifier: ^4.6.7
         version: 4.6.7
+
+  packages/templates: {}
 
   packages/tools:
     dependencies:

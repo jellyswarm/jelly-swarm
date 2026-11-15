@@ -10,5 +10,9 @@
     "@jelly/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@jelly/service": "workspace:*",
+    "viem": "^2.57.20"
   }
 }

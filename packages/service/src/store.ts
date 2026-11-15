@@ -2,7 +2,7 @@ import type { RowLeaf, Verdict } from "@jelly/checker";
 import type { JobSpec, PriceLines, PricebookKey, Quote, RowResult, SettlementAmounts } from "@jelly/engine";
 import type { Table } from "@jelly/merger";
 import type { Seal } from "@jelly/receipts";
-import type { AccountTier, ChainKey, FundingRoute, Lane } from "@jelly/shared";
+import type { AccountTier, ChainKey, FundingRoute, Lane, MeterBucket } from "@jelly/shared";
 import type { Hex } from "viem";
 
 /** Who is asking. Sign-in and sessions arrive in Phase 7; the service only needs this. */
@@ -29,9 +29,14 @@ export type JobState =
   | "merging"
   /** Settled on-chain: passed rows are held for the dispute window, the rest refunded. */
   | "settled"
+  /** Past the dispute window with no round open: the hold was released to the fee split. */
+  | "finalized"
   /** Nothing passed, or the run failed: everything was refunded. */
   | "refunded"
   | "failed";
+
+/** Where the keeper stands on auditing a settled job, once it has decided. */
+export type AuditDecision = "audited" | "skipped";
 
 export type StoredJob = {
   jobKey: Hex;
@@ -57,10 +62,23 @@ export type StoredJob = {
   seal?: Seal;
   sealTx?: string;
   settleTx?: string;
+  settledAtMs?: number;
   releaseAtSec?: number;
   amounts?: SettlementAmounts;
   /** Short, safe-to-show reason when state is "failed". */
   error?: string;
+
+  // ── settlement-keeper (§6): audit sampling, finalize, volume (§8) ──
+  /** Set once the keeper has decided whether to audit this job; undecided jobs are re-checked each tick. */
+  auditDecision?: AuditDecision;
+  auditRoundId?: bigint;
+  finalizeTx?: string;
+  finalizedAtMs?: number;
+  /** real | external_small | incentive | internal | test, once classified for the volume meter. */
+  meterBucket?: MeterBucket;
+  volumeRecordedAtMs?: number;
+  /** A job the studio ran for its own QA, never real or external_small volume. Not set by any public path. */
+  testJob?: boolean;
 };
 
 export type JobEvent = { seq: number; ts: number; type: string; payload: unknown };
@@ -99,6 +117,12 @@ export interface JobStore {
   getJobByQuote(quoteId: string): Promise<StoredJob | undefined>;
   updateJob(jobKey: Hex, patch: Partial<StoredJob>): Promise<StoredJob>;
   listJobs(accountId: string, limit: number): Promise<StoredJob[]>;
+  /** Every job settled but not yet finalized: what the settlement-keeper has to act on each tick. */
+  listAwaitingFinalize(): Promise<StoredJob[]>;
+  /** Finalized or refunded jobs in `[sinceMs, untilMs)`, not yet recorded in the volume meter. */
+  listForVolume(sinceMs: number, untilMs: number): Promise<StoredJob[]>;
+  /** Every job created in `[sinceMs, untilMs)`, whatever its state. For admin tooling and `/stats`. */
+  listAll(sinceMs: number, untilMs: number): Promise<StoredJob[]>;
   appendEvent(jobKey: Hex, type: string, payload: unknown): Promise<JobEvent>;
   eventsSince(jobKey: Hex, sinceSeq: number, limit: number): Promise<JobEvent[]>;
   putDispute(d: StoredDispute): Promise<void>;
@@ -148,6 +172,24 @@ export class MemoryJobStore implements JobStore {
       .filter((j) => j.accountId === accountId)
       .sort((a, b) => b.createdAtMs - a.createdAtMs)
       .slice(0, limit);
+  }
+
+  async listAwaitingFinalize(): Promise<StoredJob[]> {
+    return [...this.jobs.values()].filter((j) => j.state === "settled");
+  }
+
+  async listForVolume(sinceMs: number, untilMs: number): Promise<StoredJob[]> {
+    return [...this.jobs.values()].filter(
+      (j) =>
+        (j.state === "finalized" || j.state === "refunded") &&
+        j.volumeRecordedAtMs === undefined &&
+        j.createdAtMs >= sinceMs &&
+        j.createdAtMs < untilMs,
+    );
+  }
+
+  async listAll(sinceMs: number, untilMs: number): Promise<StoredJob[]> {
+    return [...this.jobs.values()].filter((j) => j.createdAtMs >= sinceMs && j.createdAtMs < untilMs);
   }
 
   async appendEvent(jobKey: Hex, type: string, payload: unknown): Promise<JobEvent> {

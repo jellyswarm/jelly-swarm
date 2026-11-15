@@ -1,0 +1,19 @@
+{
+  "name": "@jelly/settlement",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@jelly/receipts": "workspace:*",
+    "@jelly/service": "workspace:*",
+    "@jelly/shared": "workspace:*",
+    "viem": "^2.57.20"
+  },
+  "devDependencies": {
+    "@jelly/checker": "workspace:*",
+    "@jelly/engine": "workspace:*"
+  }
+}

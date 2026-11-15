@@ -1,0 +1,14 @@
+{
+  "name": "@jelly/live",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@jelly/shared": "workspace:*",
+    "viem": "^2.57.20",
+    "zod": "^4.6.7"
+  }
+}

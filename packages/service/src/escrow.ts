@@ -19,7 +19,7 @@ export type OpenJobArgs = {
   expiresAtSec: number;
 };
 
-export type EscrowStatus = "open" | "funded" | "settled" | "refunded" | "expired";
+export type EscrowStatus = "open" | "funded" | "settled" | "finalized" | "refunded" | "expired";
 
 /** A spend grant the vault owner signed (§10.2). Opaque here; the vault contract checks it. */
 export type SignedGrant = {
@@ -61,6 +61,22 @@ export interface Escrow {
 
   seal(jobKey: Hex, seal: Seal): Promise<{ tx: string }>;
   settle(jobId: bigint, verdict: Verdict, signature: Hex): Promise<{ tx: string; releaseAtSec: number }>;
+
+  /**
+   * §3.3 step 8. Opens a checker-panel round over rows of a settled job,
+   * inside its dispute window. The settlement-keeper calls this for the
+   * random 5% sample and for every job of $50 or more; a client calls the
+   * equivalent path (not modelled here) to dispute rows itself.
+   */
+  openAuditRound(jobId: bigint, rowIdx: number[]): Promise<{ roundId: bigint }>;
+  /** Rounds (audits or disputes) still open for a job. `finalize` refuses while this is above 0. */
+  roundsOpen(jobId: bigint): Promise<number>;
+  /**
+   * §3.3 step 9. After the dispute window, with no round open, releases the
+   * held amount to the 80/10/5/5 split. Permissionless on-chain; called here
+   * by the settlement-keeper as a courtesy so it happens promptly.
+   */
+  finalize(jobId: bigint): Promise<{ tx: string }>;
 }
 
 /**
@@ -84,7 +100,12 @@ export class MemoryEscrow implements Escrow {
   readonly vault = new Map<string, bigint>();
   readonly sealed = new Map<Hex, Seal>();
   readonly settled = new Map<bigint, { verdict: Verdict; signature: Hex }>();
+  private readonly rounds = new Map<bigint, { jobId: bigint; rowIdx: number[]; resolved: boolean }>();
+  private readonly openRoundsByJob = new Map<bigint, number>();
+  private readonly releaseAtSecByJob = new Map<bigint, number>();
+  readonly finalized = new Set<bigint>();
   private nextId = 1n;
+  private nextRoundId = 1n;
   private txs = 0;
 
   constructor(private readonly now: () => number = Date.now) {}
@@ -207,6 +228,47 @@ export class MemoryEscrow implements Escrow {
     if (this.sealed.get(verdict.jobKey)?.root !== verdict.receiptsRoot) throw new Error("receipts are not sealed");
     j.status = verdict.passedCount === 0 ? "refunded" : "settled";
     this.settled.set(jobId, { verdict, signature });
-    return { tx: this.tx(), releaseAtSec: Math.floor(this.now() / 1000) + 24 * 3600 };
+    const releaseAtSec = Math.floor(this.now() / 1000) + 24 * 3600;
+    this.releaseAtSecByJob.set(jobId, releaseAtSec);
+    return { tx: this.tx(), releaseAtSec };
+  }
+
+  async openAuditRound(jobId: bigint, rowIdx: number[]): Promise<{ roundId: bigint }> {
+    const j = this.job(jobId);
+    if (j.status !== "settled") throw new Error("job is not settled");
+    const releaseAtSec = this.releaseAtSecByJob.get(jobId);
+    if (releaseAtSec !== undefined && this.now() / 1000 >= releaseAtSec) throw new Error("dispute window is closed");
+    const roundId = this.nextRoundId++;
+    this.rounds.set(roundId, { jobId, rowIdx, resolved: false });
+    this.openRoundsByJob.set(jobId, (this.openRoundsByJob.get(jobId) ?? 0) + 1);
+    return { roundId };
+  }
+
+  async roundsOpen(jobId: bigint): Promise<number> {
+    return this.openRoundsByJob.get(jobId) ?? 0;
+  }
+
+  /**
+   * Test helper standing in for a checker panel's vote (§3.3 step 8). The
+   * real panel lives in CheckerNet.sol, out of scope for this in-memory
+   * escrow; here a round simply resolves as "the verdict stands".
+   */
+  resolveRound(roundId: bigint): void {
+    const round = this.rounds.get(roundId);
+    if (!round || round.resolved) return;
+    round.resolved = true;
+    const left = (this.openRoundsByJob.get(round.jobId) ?? 1) - 1;
+    this.openRoundsByJob.set(round.jobId, Math.max(0, left));
+  }
+
+  async finalize(jobId: bigint): Promise<{ tx: string }> {
+    const j = this.job(jobId);
+    if (j.status !== "settled") throw new Error("job is not settled");
+    const releaseAtSec = this.releaseAtSecByJob.get(jobId);
+    if (releaseAtSec === undefined || this.now() / 1000 < releaseAtSec) throw new Error("dispute window is still open");
+    if ((this.openRoundsByJob.get(jobId) ?? 0) > 0) throw new Error("a round is still open for this job");
+    j.status = "finalized";
+    this.finalized.add(jobId);
+    return { tx: this.tx() };
   }
 }

@@ -20,7 +20,7 @@ import { z } from "zod";
  * protocol's published shape; run it against a real x402 client before
  * launch. The Solana path arrives with the Solana program in Phase 8.
  */
-export const X402_VERSION = 1;
+export const X402_VERSION = 1 as const;
 
 export type PaymentRequirements = {
   scheme: "exact";
@@ -189,15 +189,17 @@ const typedMessage = (a: Authorization) => ({
  * signed authorization as written: the money moves from the payer to
  * `payTo`, and this key pays gas. It never holds the funds.
  */
+export type LocalEvmFacilitatorDeps = {
+  network: string;
+  publicClient: Pick<PublicClient, "readContract" | "waitForTransactionReceipt">;
+  /** Gas-paying key. Omit to run verify-only. */
+  walletClient?: Pick<WalletClient, "writeContract" | "account" | "chain">;
+  now?: () => number;
+};
+
 export class LocalEvmFacilitator implements Facilitator {
   constructor(
-    private readonly deps: {
-      network: string;
-      publicClient: Pick<PublicClient, "readContract" | "waitForTransactionReceipt">;
-      /** Gas-paying key. Omit to run verify-only. */
-      walletClient?: Pick<WalletClient, "writeContract" | "account" | "chain">;
-      now?: () => number;
-    },
+    private readonly deps: LocalEvmFacilitatorDeps,
   ) {}
 
   async verify(payment: PaymentPayload, req: PaymentRequirements): Promise<VerifyResult> {

@@ -1,0 +1,320 @@
+JELLYSWARM: Overview
+
+Up to 247 open-model agents on one job. You see a fixed price before it runs, your
+money waits in escrow while it runs, and you pay only for the work that passes.
+
+One engine, three products: FANOUT ($FNOUT)**, **TRAWL ($TRWL) and PICKET
+($PIKT). Jobs settle on Base, Solana and Robinhood Chain, plus HyperEVM / Elysium
+for Picket. Prepared 2026-11-07. (U) marks a claim we have not verified independently.
+
+In plain words
+
+An agent swarm is a team of AIs that splits one big job between them:
+
+1. A planner reads your request and cuts it into small pieces.
+2. Up to 247 workers each take one piece, all at the same time.
+3. A checker re-checks every piece against its sources. It comes from a different AI
+
+     family from the workers, so it doesn't share their blind spots.
+4. A merger stitches the passed pieces into one table or report.
+
+Work that would take one AI an hour takes the swarm minutes. Swarms suit wide work:
+"here are 300 tokens; give me holders, liquidity lock and next unlocks for each, with a
+link behind every cell."
+
+What 247 means. It is the most agents JellySwarm will ever put on one job. It is a hard
+cap, and every quote shows it ("this job will use 183 of 247 agents"). Longer lists run in
+waves. It counts agents. It is not shorthand for "all day, every day". When a service
+never stops, we say "around the clock". A full-width job is about 250 model calls, and
+our prices are built on that unit.
+
+One engine, three products. Fanout is the engine's public door. Trawl and Picket are
+apps that run on Fanout's own API, so their jobs leave the same public receipts.
+
+Try it in 30 seconds
+
+1. Open the page and type what you want in plain words. "Compare these 200
+     tokens." "Find me the cheapest flights to Lisbon next month." The planner turns your
+     words into a job and shows the fixed price and the agent count before anything runs.
+
+2. Your first small job is free. You don't need a wallet. Sign in with a passkey or an
+     email link, or just open the page and go. We don't ask for ID, a card or a company.
+3. Watch the swarm. A live grid shows up to 247 agent tiles moving through five
+
+     states: scouting, working, checking, passed and refunded. Next to the grid are a
+     countdown and a running cost counter. You can share the view or screenshot it.
+4. Get your table, with a source behind every cell. Every result has its own link, which
+     you can keep private or make public, plus a Run this again button.
+5. Keep going.
+
+          Wallet: signing in with a passkey creates a wallet whose key stays on your
+          device, never with us. Top it up with USDC or USDG from any wallet, or through
+          an onramp you choose.
+          Templates: pick a one-tap job from the gallery.
+          Other apps: the same account works in the Telegram bot and the mobile web
+          app.
+          Referrals: friends who run a job from your link get you job credits. Credits are
+          the only reward.
+
+Heavy days. When demand spikes, free jobs wait in their own queue, and paid jobs go
+first. Worker pools scale across several model hosts, and Open-tier jobs can also use
+community GPUs. Busy hours mean a longer wait, never a higher price.
+
+Why now
+
+     Swarms already sell to consumers. Manus runs Wide Research with 100+ parallel
+     sub-agents on plans from $20 a month. It reached about $450M annualized
+     revenue by June 2026 (Oracore). Genspark hit $250M ARR in 12 months
+     (Business Wire). Reviewers rate the swarm job as the best use: 200 items turned into
+     a cited spreadsheet (Preuve.ai).
+     The engine is open and cheap. Kimi K2.6 is open-weight and runs 300 sub-
+     agents (The Decoder). DeepSeek V4 Flash costs $0.14 / $0.28 per million tokens
+     (MIT licence), and gpt-oss-120b costs $0.037 / $0.17 at DeepInfra (Morph;
+     Infrabase). On our estimates, a full job costs $0.33–$3.21 in model time.
+     The plug is standard, and almost nobody charges through it. The official MCP
+     registry lists 47,879 servers, and Claude, ChatGPT, Gemini, Cursor and VS Code all
+     speak MCP (Digital Applied). Only 3–6% of MCP servers charge anything
+     (SignalCensus).
+     The loudest complaint is the bill. Manus scores 1.2 on Trustpilot, refunds credits
+     only for "technical issues on our end", and gave one user back 5% of 130k credits
+     (Preuve.ai). Multi-agent systems use about 15x the tokens of a chat (Anthropic
+     Engineering).
+     Swarm tokens without outside fees died. $SWARMS is down about 98.8% from
+     its high (TokenRadar). Virtuals' revenue fell 97% when trading cooled
+     (Blockchain.News).
+
+So JellySwarm competes on the billing contract.
+
+The four promises
+
+Promise    What it means for you           How it is enforced
+
+Fixed      You see the price, the agent    The planner prices the job in a dry run. A
+price      count (of 247) and the          budget guard refuses any model call that
+first      columns before anything         would exceed the quote. We absorb any
+           runs, and the price never       overrun
+           rises
+                                           If a job expires before it settles, anyone
+Escrow,    Your money waits in an on-      can trigger the full refund. No admin,
+with a     chain contract you can see,     pause switch or plug-in can block it
+refund     not in our wallet
+nobody                                     The checker uses a different model
+can block                                  family from the workers. A failed row gets
+                                           one retry. If it fails again, it is refunded
+Pay only   Each row is its own payment     automatically at settlement
+for rows   slot, and you pay only for the
+that pass  rows an independent checker     Receipts are hash-chained, and each
+           passed                          job's Merkle root goes on-chain. Sealed
+                                           jobs add a hardware attestation for every
+A signed   The "swarm transcript"          call
+receipt    shows which agent did what,
+for every  on which model and host, at
+model      what cost
+call
+
+Three products, one engine
+
+Product    In one line                     Price          Pay in / token venue
+
+FANOUT     Add one MCP tool to             $0.25 per job  USDC on Base and
+($FNOUT)   Claude, ChatGPT or              + $0.005 /     Solana, or USDG on
+           Cursor, give it a list and a    $0.015 /       Robinhood Chain, paid
+           question, and up to 247         $0.04 per      over x402 or from a
+           agents do the work              agent          prepaid balance. $FNOUT
+                                                          is on Robinhood Chain
+TRAWL    Paste up to 500 tokens,       From $0.05       USDC on Solana or USDG
+($TRWL)  wallets or any everyday       per token        on Robinhood Chain.
+         list, and get back one cited  (min $2).        $TRWL launches on
+         table                         Wallets:         Pump.fun
+                                       $0.50 each.
+                                       Reports: $9
+
+PICKET   Up to 247 wallets, tokens,    $15 a month      HyperEVM / Elysium, plus
+($PIKT)  Hyperliquid accounts or       for 25           USDC on Solana and
+         keywords watched around       targets, or      Base. $PIKT is on Elysium
+         the clock, with one plain     $49 for 247,
+         log every morning. It never   billed only for
+         trades                        days the
+                                       watch ran
+
+Ship order.
+
+1. Fanout ships first.
+2. Trawl follows about two weeks later.
+3. Picket opens as a free beta on Elysium after the network's 9 November mainnet. Its
+
+     token and paid plans start once Elysium's native Hyperliquid data arrives (expected
+     early December) and the beta passes its quality bar.
+
+Narrowed "first" claims:
+
+     Fanout: the first hosted MCP tool that fans one call out to up to 247 open-model
+     agents, paid per job over x402, with failed work refunded automatically from escrow
+     and a receipt for every call. (U)
+     Trawl: the first crypto wide-research swarm where you see a fixed price before it
+     runs and pay only for the rows an independent checker passed, with a signed receipt
+     for every agent call. (U)
+     Picket: the first always-on watch swarm launched on Elysium where every alert is
+     checked against the raw chain event before it is sent, and days the watch wasn't
+     running are refunded automatically. (U)
+
+Tiers and price
+
+Price per job = $0.25 base + (agents × per-agent rate) + data and tool calls at
+cost plus 10%. Data and tool calls show as a separate line in the quote.
+
+                                                        Full  Our
+Tier     What runs it                                  Per    247-        model
+                                                       agent  agent       cost
+                                                              job         (est.)
+
+Open     gpt-oss-120b workers. This is the only        $0.005 $1.49       ~$0.33
+         tier that can use community GPUs
+
+Standard DeepSeek V4 Flash workers                     $0.015 $3.96       ~$0.54–
+                                                                          $0.93
+
+Sealed   Every call runs on attested GPU-TEE           $0.04  $10.13 ~$3.21
+         hardware (Phala at launch)
+
+Smaller jobs cost less. A 20-agent Standard job costs $0.55.
+Failed rows come back. A failed row is refunded with its share of the price. If
+nothing passes, everything is refunded, base fee included.
+Wallet jobs always run Sealed, because a list of your wallets reveals what you
+own.
+Discounts. Token holders get up to 20% off that product's quotes.
+
+Open models we run
+
+Role     Default model                                        Licence
+
+Planner  DeepSeek V4 Pro, or Kimi K3 as a premium toggle      MIT. Kimi K3 has a
+                                                              custom licence
+
+Workers  gpt-oss-120b, DeepSeek V4 Flash, Qwen 3.6 35B-       Apache 2.0, MIT,
+         A3B / Qwen3.8-27B                                    Apache 2.0
+
+Checker  GLM-5.3 Flash, a different family from every         MIT
+         worker
+
+Merger DeepSeek V4 Pro                                        MIT
+
+Picket   gpt-oss-20b or Qwen 3.6 35B-A3B                      Apache 2.0
+triage
+
+JellySwarm runs open-weight models from DeepSeek, Qwen, OpenAI (gpt-oss), Z.ai and
+Moonshot. That describes what runs, not an endorsement by any of them. Kimi K2.6 is
+an optional orchestrator. Open models make a $1.49 full-width job possible, and their
+licences allow resale (we read each LICENSE before launch).
+How the tokens work
+
+Each product has its own token, venue and fee stream, so one product's bad week can't
+drain the others.
+
+Where each payment goes. Every paid row splits 80% / 10% / 5% / 5%:
+
+     80% to worker operators
+     10% to the treasury
+     5% to checker pay
+     5% to buy-and-burn of that product's token
+
+Burns are funded only by outside stablecoin fees. The burn share spends only USDC
+or USDG paid for jobs by wallets outside our own set. Each burn transaction links to the
+job receipts that funded it. When we, or wallets linked to us, pay for a job, that share
+goes to the treasury instead. Free jobs and referral credits never fund burns.
+
+A public meter for real paid volume. /stats counts a job as real only if all of these
+are true:
+
+     an outside wallet paid for it;
+     that wallet was not funded by one of ours within 3 hops over the past 30 days;
+     a checker separate from the workers checked it;
+     it was worth at least $1.
+
+What a token is for:
+
+     Access: higher caps and priority in the queue.
+     Credits: a monthly allowance of free small jobs, paid from the treasury.
+     Discounts: up to 20% off quotes.
+     Checker stake: checkers stake the token to sit on a panel and lose part of the stake
+     if they approve bad work.
+
+What a token never does. It never pays for jobs, which are always priced in USDC or
+USDG. It carries no trading tax and no emissions, and its supply never changes after
+launch. Checker pay is a wage for checking work, not income for holders.
+
+What it won't do
+
+     Trade, place orders or hold keys. Agent trading still loses money. Olas'
+     Polymarket agents averaged −4.14% ROI (Olas).
+     Hold your money outside escrow or your own wallet. Your embedded wallet's
+     key stays on your device. The owner can withdraw a prepaid balance at any time,
+     even while the system is halted.
+     Ask for ID, a card or a company. There is no KYC or KYB. Email is optional and
+     used only to sign in.
+     Buy, book, claim or send. Everyday mode compares options but doesn't buy.
+     Wallet sweeps are read-only. Lead lists are delivered to you, never sent.
+     Give advice, or treat a guess as a fact. Results have no buy or sell column and
+     name no private person. A cell the checker can't verify shows "unverified".
+     Run abusive jobs. It never scrapes behind a login or ignores robots.txt, and it
+     rejects spam, outreach and flood-shaped jobs.
+
+Honest limits
+
+     We sign the receipts on Open and Standard jobs. They prove what we say ran,
+     not what the hardware did. Only Sealed jobs carry hardware attestation.
+     We run the checkers and workers at launch. Until outside checkers stake in,
+     "independent" means a separate process, key and model family, not a separate
+     organisation. Until outside operators join, the 80% goes to our own operator wallets.
+      /stats says both.
+     Checkers miss things. Spot audits and per-row disputes (24-hour window) exist
+     for what they miss.
+     Our costs are estimates. They come from an assumed token mix. If real contexts
+     run twice as long, our costs roughly double. Your quote stays the same.
+     Onramps are third parties. An onramp you pick may ask you for ID. We never see
+     what you give it.
+     x402 is still small. Daily x402 value was about $2,815 on 21 October (TokenPost).
+     Our venues are young or cooling. Robinhood Chain transactions reportedly fell
+     about 42% in a month in October (CoinCentral, headline only) (U). Elysium has no
+     usage history yet.
+     Tokens start thin. Burns are market buys, so on quiet days they're batched.
+
+FAQ
+
+Does every job get 247 agents?
+No. 247 is the ceiling, and your quote shows the exact number your job will use.
+
+What if a job fails halfway?
+You pay for the rows that passed. Rows that fail twice are refunded at settlement. If
+nothing passes, everything is refunded. If a job never settles, anyone can trigger a full
+refund once it expires.
+
+Do I need the token?
+No. You pay in USDC or USDG. The token gives you discounts, a small free monthly
+allowance and priority in the queue.
+
+Can my AI pay on its own?
+Yes, over x402, if your AI holds a wallet. If it doesn't, top up a prepaid balance once, buy
+a wallet-bound API key and give your AI the key. The key can spend only up to the caps
+you set.
+
+Who sees my data?
+Each worker sees only its own piece. Wallet lists run only on TEE hosts, never on
+community GPUs. Shared links and public transcripts show only what you choose to
+publish. Wallet sweeps can't be made public.
+
+What if I lose my phone?
+Your wallet key is a passkey, so it syncs through your own device account. You can also
+add a second passkey or a backup wallet address. We can't recover it for you, because
+we never hold it.
+
+Can I run a node?
+Yes, but only for Open-tier worker calls:
+
+     Serve gpt-oss or Qwen 3.x on vLLM.
+     Prove your model with a GPU-TEE quote or a fingerprint challenge.
+     Stake USDC plus the product's token.
+
+We re-run 5% of calls on a trusted host. A mismatch costs 10% of your stake. You're
+paid in USDC from the worker share of passed rows, never in emissions.
+

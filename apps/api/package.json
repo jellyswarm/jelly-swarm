@@ -1,0 +1,20 @@
+{
+  "name": "@jelly/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@hono/trpc-server": "^0.4.2",
+    "@jelly/engine": "workspace:*",
+    "@jelly/service": "workspace:*",
+    "@jelly/shared": "workspace:*",
+    "@jelly/x402": "workspace:*",
+    "@trpc/server": "^11.28.2",
+    "hono": "^4.13.18",
+    "viem": "^2.57.20",
+    "zod": "^4.6.7"
+  }
+}

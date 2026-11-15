@@ -1,0 +1,25 @@
+{
+  "name": "@jelly/service",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@jelly/budget-guard": "workspace:*",
+    "@jelly/checker": "workspace:*",
+    "@jelly/engine": "workspace:*",
+    "@jelly/gateway": "workspace:*",
+    "@jelly/merger": "workspace:*",
+    "@jelly/policy": "workspace:*",
+    "@jelly/receipts": "workspace:*",
+    "@jelly/shared": "workspace:*",
+    "viem": "^2.57.20",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@jelly/fetcher": "workspace:*",
+    "@jelly/tools": "workspace:*"
+  }
+}

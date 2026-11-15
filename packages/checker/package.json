@@ -1,0 +1,24 @@
+{
+  "name": "@jelly/checker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./src/testkit": "./src/testkit.ts"
+  },
+  "dependencies": {
+    "@jelly/engine": "workspace:*",
+    "@jelly/fetcher": "workspace:*",
+    "@jelly/gateway": "workspace:*",
+    "@jelly/policy": "workspace:*",
+    "@jelly/receipts": "workspace:*",
+    "@jelly/shared": "workspace:*",
+    "@jelly/tools": "workspace:*",
+    "viem": "^2.57.20",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@jelly/budget-guard": "workspace:*"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@jelly/tools",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@jelly/engine": "workspace:*",
+    "@jelly/fetcher": "workspace:*",
+    "@jelly/policy": "workspace:*",
+    "@jelly/shared": "workspace:*",
+    "viem": "^2.57.20",
+    "zod": "^4.6.7"
+  }
+}

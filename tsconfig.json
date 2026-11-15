@@ -1,0 +1,22 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/shared" },
+    { "path": "packages/db" },
+    { "path": "packages/receipts" },
+    { "path": "packages/budget-guard" },
+    { "path": "packages/policy" },
+    { "path": "packages/gateway" },
+    { "path": "packages/engine" },
+    { "path": "packages/queues" },
+    { "path": "packages/fetcher" },
+    { "path": "packages/tools" },
+    { "path": "packages/checker" },
+    { "path": "packages/merger" },
+    { "path": "packages/x402" },
+    { "path": "packages/service" },
+    { "path": "apps/api" },
+    { "path": "apps/mcp" },
+    { "path": "tools/copy-lint" }
+  ]
+}

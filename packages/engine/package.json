@@ -1,0 +1,21 @@
+{
+  "name": "@jelly/engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@jelly/gateway": "workspace:*",
+    "@jelly/policy": "workspace:*",
+    "@jelly/receipts": "workspace:*",
+    "@jelly/shared": "workspace:*",
+    "ioredis": "^6.0.0",
+    "viem": "^2.57.20",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@jelly/budget-guard": "workspace:*"
+  }
+}

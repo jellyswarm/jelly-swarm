@@ -18,10 +18,10 @@ function makeTestApi(s: ReturnType<typeof makeService>): SwarmApi {
     runFromVault: () => Promise.resolve(fail(400, "not used in this test")),
     runX402: async (quoteId, payer) => {
       const { job } = await s.service.prepare(account, quoteId, "wallet", payer);
-      if (job.state !== "awaiting_payment") return ok(job);
+      if (job.state !== "awaiting_payment") return ok({ job });
       const stored = (await s.store.getJob(job.jobKey))!;
       s.escrow.markFunded(stored.jobId, payer as Address);
-      return s.service.confirm(account, job.jobKey).then(ok);
+      return s.service.confirm(account, job.jobKey).then((j) => ok({ job: j }));
     },
     status: (jobKey, sinceSeq) => s.service.status(account, jobKey as `0x${string}`, sinceSeq).then(ok, (e) => fail(404, e.message)),
     result: (jobKey, format) => s.service.result(account, jobKey as `0x${string}`, format).then(ok, (e) => fail(409, e.message)),
@@ -61,8 +61,9 @@ describe("MCP server (§9.1)", () => {
     const { client } = await connected(makeTestApi(s));
     const { tools } = await client.listTools();
     const all = tools.map((t) => t.description).join(" ");
-    expect(/\badvice\b/i.test(all)).toBe(false);
-    expect(all).toContain("up to 247");
+    // Saying a result is "not advice" is the point; what must never appear is a claim that it IS.
+    expect(/(?<!not )\badvice\b/i.test(all)).toBe(false);
+    expect(/\b(up to|of) 247\b/i.test(all)).toBe(true); // the 247 cap is always written this way, never a bare "247 agents"
   });
 
   test("swarm_quote then swarm_run end to end, with a source behind each cell", async () => {

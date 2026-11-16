@@ -1,5 +1,5 @@
 {
   "extends": "../../tsconfig.base.json",
   "include": ["src"],
-  "references": [{ "path": "../shared" }, { "path": "../receipts" }, { "path": "../policy" }, { "path": "../gateway" }, { "path": "../engine" }, { "path": "../checker" }, { "path": "../merger" }, { "path": "../budget-guard" }]
+  "references": [{ "path": "../shared" }, { "path": "../receipts" }, { "path": "../policy" }, { "path": "../gateway" }, { "path": "../engine" }, { "path": "../checker" }, { "path": "../merger" }, { "path": "../budget-guard" }, { "path": "../templates" }]
 }

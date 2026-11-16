@@ -1,4 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
+import { loadInfraEnv } from "@jelly/shared";
+import { Redis } from "ioredis";
 import { type Address, type Hex, keccak256, toBytes } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import {
@@ -11,6 +13,7 @@ import {
   MemoryNonceStore,
   type PaymentPayload,
   type PaymentRequirements,
+  RedisNonceStore,
   TRANSFER_WITH_AUTHORIZATION_TYPES,
   X402Error,
   X402_VERSION,
@@ -92,7 +95,7 @@ describe("checkPayment", () => {
 
   test.each([
     ["wrong network", { network: "eip155:1" } as const, {}],
-    ["wrong recipient", {}, { to: "0x0000000000000000000000000000000000dead" as Address }],
+    ["wrong recipient", {}, { to: "0x000000000000000000000000000000000000dEaD" as Address }],
     ["more than required", {}, { value: "260000" }],
     ["less than required", {}, { value: "240000" }],
     ["not yet valid", {}, { validAfter: "5000" }],
@@ -196,6 +199,28 @@ describe("FallbackFacilitator", () => {
 describe("MemoryNonceStore", () => {
   test("a nonce is claimed once per network and payer", async () => {
     const store = new MemoryNonceStore();
+    expect(await store.claim("eip155:8453", payer.address, "0xabc")).toBe(true);
+    expect(await store.claim("eip155:8453", payer.address, "0xabc")).toBe(false);
+    expect(await store.claim("eip155:1", payer.address, "0xabc")).toBe(true);
+    expect(await store.claim("eip155:8453", payer.address, "0xdef")).toBe(true);
+  });
+});
+
+// Needs a reachable Redis (REDIS_URL, default docker-compose); skipped when unreachable unless REQUIRE_INFRA=1.
+const redis = new Redis(loadInfraEnv().REDIS_URL, {
+  lazyConnect: true,
+  maxRetriesPerRequest: 0,
+  retryStrategy: () => null,
+  connectTimeout: 5000,
+});
+redis.on("error", () => {});
+const redisUp = await redis.connect().then(() => true, () => false);
+if (!redisUp && process.env.REQUIRE_INFRA === "1") throw new Error("REQUIRE_INFRA=1 but Redis is not reachable");
+afterAll(() => redis.disconnect());
+
+describe("RedisNonceStore", () => {
+  test.skipIf(!redisUp)("behaves the same as the in-memory store: once per network and payer", async () => {
+    const store = new RedisNonceStore(redis, `x402test:${process.pid}:${Date.now()}:`);
     expect(await store.claim("eip155:8453", payer.address, "0xabc")).toBe(true);
     expect(await store.claim("eip155:8453", payer.address, "0xabc")).toBe(false);
     expect(await store.claim("eip155:1", payer.address, "0xabc")).toBe(true);

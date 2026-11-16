@@ -12,9 +12,17 @@
     "migrate": "bun src/migrate.ts"
   },
   "dependencies": {
+    "@jelly/auth": "workspace:*",
+    "@jelly/checker": "workspace:*",
+    "@jelly/engine": "workspace:*",
+    "@jelly/merger": "workspace:*",
+    "@jelly/receipts": "workspace:*",
+    "@jelly/service": "workspace:*",
     "@jelly/shared": "workspace:*",
+    "@jelly/templates": "workspace:*",
     "drizzle-orm": "^0.45.4",
-    "postgres": "^4.1.1"
+    "postgres": "^4.1.1",
+    "viem": "^2.57.20"
   },
   "devDependencies": {
     "drizzle-kit": "^0.31.11"

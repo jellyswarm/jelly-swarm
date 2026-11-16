@@ -101,7 +101,9 @@ export const apiKeys = pgTable(
   {
     keyId: text("key_id").primaryKey(),
     keyHash: bytea("key_hash").notNull(),
-    accountId: uuid("account_id").notNull().references(() => accounts.id),
+    // @jelly/service's own account-id space (may be "anon:<uuid>" or "key:<uuid>" for a caller
+    // with no signed-in identity), not a row in `accounts` — see the comment on `quotes.accountId`.
+    accountId: text("account_id").notNull(),
     walletAddress: text("wallet_address").notNull(),
     chain: text("chain").notNull(),
     /** Set once the owner has signed the SpendGrant that activates the key. */
@@ -130,7 +132,9 @@ export const quotes = pgTable(
   "quotes",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    accountId: uuid("account_id").references(() => accounts.id),
+    // @jelly/service's own account-id space, not a foreign key into `accounts`: a caller with
+    // no signed-in identity gets a synthetic id (e.g. "anon:<uuid>") that never has an accounts row.
+    accountId: text("account_id"),
     spec: jsonb("spec").notNull(),
     specHash: text("spec_hash").notNull(),
     product: text("product").notNull(),
@@ -148,6 +152,8 @@ export const quotes = pgTable(
     signature: text("signature").notNull(),
     createdAt: createdAt(),
     expiresAt: ts("expires_at").notNull(),
+    /** Full StoredQuote (pricebookKey, the signed Quote, PriceLines, walletJob, tierForced), bigints as strings. */
+    extra: jsonb("extra").notNull(),
   },
   (t) => [
     check("quotes_max_agents_cap", sql`${t.maxAgents} between 1 and 247`),
@@ -168,7 +174,8 @@ export const jobs = pgTable(
     chain: text("chain").notNull(),
     onchainJobId: text("onchain_job_id"),
     quoteId: uuid("quote_id").notNull().references(() => quotes.id),
-    accountId: uuid("account_id").references(() => accounts.id),
+    // @jelly/service's own account-id space; see the comment on quotes.accountId above.
+    accountId: text("account_id"),
     product: text("product").notNull(),
     tier: text("tier").notNull(),
     lane: text("lane").notNull(),
@@ -206,6 +213,10 @@ export const jobs = pgTable(
     finalizedAt: ts("finalized_at"),
     /** After this, anyone may claim a full refund if the job never settled. */
     expiredAt: ts("expired_at"),
+    /** Null until listForVolume has recorded this job in the volume meter. */
+    volumeRecordedAt: ts("volume_recorded_at"),
+    /** Full StoredJob (spec, lines, rows, table, summary, verdict, seal, amounts, ...), bigints as strings. */
+    job: jsonb("job").notNull(),
   },
   (t) => [
     check("jobs_passed_le_rows", sql`${t.passedCount} is null or ${t.passedCount} between 0 and ${t.rowCount}`),
@@ -290,8 +301,11 @@ export const jobEvents = pgTable(
 export const disputes = pgTable(
   "disputes",
   {
-    id: bigserial("id", { mode: "bigint" }).primaryKey(),
+    /** Caller-supplied (the service layer's own randomUUID()), not DB-generated. */
+    id: uuid("id").primaryKey(),
     jobKey: text("job_key").notNull().references(() => jobs.jobKey),
+    // @jelly/service's own account-id space; see the comment on quotes.accountId above.
+    accountId: text("account_id").notNull(),
     rowIdx: integer("row_idx").array().notNull(),
     feeUsd6: usd6("fee_usd6").notNull(),
     /** client | audit */
@@ -340,7 +354,8 @@ export const shareLinks = pgTable(
   {
     slug: text("slug").primaryKey(),
     jobKey: text("job_key").notNull().references(() => jobs.jobKey),
-    accountId: uuid("account_id").notNull().references(() => accounts.id),
+    // @jelly/service's own account-id space; see the comment on quotes.accountId above.
+    accountId: text("account_id").notNull(),
     /** private | unlisted | public */
     visibility: text("visibility").notNull().default("private"),
     /** Frozen snapshot: CSV + Markdown + manifest. */
@@ -351,13 +366,23 @@ export const shareLinks = pgTable(
   (t) => [index("share_links_job_idx").on(t.jobKey)],
 );
 
+/** One stable code per account (§11.4). Looked up both ways: by owner and by code. */
+export const referralCodes = pgTable("referral_codes", {
+  // @jelly/service's own account-id space; see the comment on quotes.accountId above.
+  accountId: text("account_id").primaryKey(),
+  code: text("code").notNull().unique(),
+  createdAt: createdAt(),
+});
+
 export const referrals = pgTable(
   "referrals",
   {
-    id: bigserial("id", { mode: "bigint" }).primaryKey(),
+    /** Caller-supplied (the service layer's own randomUUID()), not DB-generated. */
+    id: uuid("id").primaryKey(),
     refCode: text("ref_code").notNull(),
-    referrer: uuid("referrer").notNull().references(() => accounts.id),
-    referee: uuid("referee").notNull().references(() => accounts.id),
+    // @jelly/service's own account-id space; see the comment on quotes.accountId above.
+    referrer: text("referrer").notNull(),
+    referee: text("referee").notNull(),
     /** pending | paid | blocked */
     state: text("state").notNull().default("pending"),
     blockReason: text("block_reason"),
@@ -377,7 +402,8 @@ export const creditLedger = pgTable(
   "credit_ledger",
   {
     id: bigserial("id", { mode: "bigint" }).primaryKey(),
-    accountId: uuid("account_id").notNull().references(() => accounts.id),
+    // @jelly/service's own account-id space; see the comment on quotes.accountId above.
+    accountId: text("account_id").notNull(),
     deltaUsd6: usd6("delta_usd6").notNull(),
     /** referral | signup | holder_allowance | restore | spend | expire */
     reason: text("reason").notNull(),

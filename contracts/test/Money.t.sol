@@ -167,7 +167,7 @@ contract MoneyTest is Base {
 
         vm.startPrank(checker);
         bond.requestExit();
-        vm.warp(block.timestamp + 7 days);
+        vm.warp(vm.getBlockTimestamp() + 7 days);
         bond.withdraw();
         vm.stopPrank();
         assertEq(usd.balanceOf(checker), MIN_BOND);
@@ -226,8 +226,9 @@ contract MoneyTest is Base {
         BalanceVault.SpendGrant memory g = _grant(25e6, 50e6);
         uint256 jobId = _open(_rows(10, UNIT, BASE, 0));
         uint256 budget = job.jobOf(jobId).budget;
+        bytes memory sig = _signGrant(ownerPk, g);
         vm.prank(relayer);
-        vault.fundJob(g, _signGrant(ownerPk, g), jobId, budget);
+        vault.fundJob(g, sig, jobId, budget);
         vm.warp(block.timestamp + 2 hours);
         job.claimRefund(jobId);
         assertEq(vault.balanceOf(owner), 50e6);
@@ -238,8 +239,9 @@ contract MoneyTest is Base {
         BalanceVault.SpendGrant memory g = _grant(25e6, 50e6);
         uint256 jobId = _open(_rows(10, UNIT, BASE, 0));
         uint256 budget = job.jobOf(jobId).budget;
+        bytes memory sig = _signGrant(ownerPk, g);
         vm.prank(relayer);
-        vault.fundJob(g, _signGrant(ownerPk, g), jobId, budget);
+        vault.fundJob(g, sig, jobId, budget);
 
         vm.prank(guardian);
         halt.halt();
@@ -287,9 +289,10 @@ contract MoneyTest is Base {
         vm.expectRevert(BalanceVault.NotAllowed.selector);
         vault.fundJob(g, sig, jobId, 10_250_000);
 
+        bytes memory badSig = _signGrant(0xBAD, g);
         vm.startPrank(relayer);
         vm.expectRevert(BalanceVault.BadGrant.selector); // signed by someone else
-        vault.fundJob(g, _signGrant(0xBAD, g), jobId, 10_250_000);
+        vault.fundJob(g, badSig, jobId, 10_250_000);
 
         BalanceVault.SpendGrant memory widened = _grant(1000e6, 1000e6); // caps changed after signing
         vm.expectRevert(BalanceVault.BadGrant.selector);

@@ -1,5 +1,24 @@
 {
   "extends": "../../tsconfig.base.json",
   "include": ["src"],
-  "references": [{ "path": "../../packages/shared" }, { "path": "../../packages/service" }, { "path": "../../packages/x402" }, { "path": "../../packages/engine" }]
+  "references": [
+    { "path": "../../packages/shared" },
+    { "path": "../../packages/service" },
+    { "path": "../../packages/x402" },
+    { "path": "../../packages/engine" },
+    { "path": "../../packages/abuse" },
+    { "path": "../../packages/auth" },
+    { "path": "../../packages/budget-guard" },
+    { "path": "../../packages/checker" },
+    { "path": "../../packages/db" },
+    { "path": "../../packages/fetcher" },
+    { "path": "../../packages/gateway" },
+    { "path": "../../packages/live" },
+    { "path": "../../packages/merger" },
+    { "path": "../../packages/policy" },
+    { "path": "../../packages/receipts" },
+    { "path": "../../packages/settlement" },
+    { "path": "../../packages/templates" },
+    { "path": "../../packages/tools" }
+  ]
 }

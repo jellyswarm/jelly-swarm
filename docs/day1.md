@@ -54,3 +54,13 @@ Status: `open` = not checked yet, `confirmed` = checked (add the evidence),
 | 16 | Kill-switch drill on solana-test-validator (the EVM half runs as `contracts/test/KillSwitchDrill.t.sol`) | open | Needs `programs/jelly_sol` (Phase 8) first. |
 | 17 | Real chain indexer for the volume classifier's funding graph (`@jelly/settlement`'s `FundingGraph`); `MemoryFundingGraph` and `NullFundingGraph` are stand-ins | open | Until built, production should run `NullFundingGraph`, which never over-classifies a job as internal. |
 | 18 | Burn bucket feed for `/stats`'s `burns` list (today it is whatever the deployment passes in; nothing reads `BurnBucket.Burned` events yet) | open | |
+
+## Retail (Phase 7 additions)
+
+| # | Check | Status | Result |
+|---|---|---|---|
+| 19 | A real `PasskeyVerifier` (e.g. `@simplewebauthn/server`): `@jelly/auth`'s `AuthService` is tested against a fake one, since a real WebAuthn ceremony needs a browser or a virtual authenticator | open | |
+| 20 | `@jelly/intake`'s generator step is one bounded gateway call with `fetch_url`, not a real multi-query discovery engine; it will under-deliver on broad "find me X" asks | open | |
+| 21 | The quote→job flow does not yet consult `@jelly/templates`' registry, so a job built from a template does not record which version it used; `createShare`'s `templateVersion` field is always unset | open | |
+| 22 | `self-referral` signals (`sameDevice`, `sameIpPrefix`, `fundingLinked`) are computed by whoever calls `JobService.registerReferral`; no wiring yet connects `@jelly/auth`'s device records or `@jelly/settlement`'s `FundingGraph` to that call | open | |
+| 23 | `apps/api`'s `/v1/ws` route needs `websocket` (exported from `apps/api`) passed to `Bun.serve`; there is no production bootstrap yet (same gap as the REST app itself — see §5's day-1 notes on `ViemEscrow`) | open | |

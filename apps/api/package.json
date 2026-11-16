@@ -8,19 +8,31 @@
   },
   "dependencies": {
     "@hono/trpc-server": "^0.4.2",
+    "@jelly/abuse": "workspace:*",
+    "@jelly/auth": "workspace:*",
+    "@jelly/budget-guard": "workspace:*",
+    "@jelly/checker": "workspace:*",
+    "@jelly/db": "workspace:*",
     "@jelly/engine": "workspace:*",
+    "@jelly/fetcher": "workspace:*",
+    "@jelly/gateway": "workspace:*",
     "@jelly/live": "workspace:*",
+    "@jelly/merger": "workspace:*",
+    "@jelly/policy": "workspace:*",
+    "@jelly/receipts": "workspace:*",
+    "@jelly/service": "workspace:*",
     "@jelly/settlement": "workspace:*",
     "@jelly/shared": "workspace:*",
+    "@jelly/templates": "workspace:*",
+    "@jelly/tools": "workspace:*",
+    "@jelly/x402": "workspace:*",
     "@trpc/server": "^11.28.2",
     "hono": "^4.13.18",
+    "ioredis": "^6.0.0",
     "viem": "^2.57.20",
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@jelly/checker": "workspace:*",
-    "@jelly/service": "workspace:*",
-    "@jelly/x402": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.32.2"
   }
 }

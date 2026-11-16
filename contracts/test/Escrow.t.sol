@@ -46,8 +46,9 @@ contract EscrowTest is Base {
             for (uint256 i; i < k; ++i) {
                 steps[i] = uint8(uint256(keccak256(abi.encode(seed, i))) % 4);
             }
-            vm.prank(keeper);
+            vm.startPrank(keeper);
             uint256 roundId = split.auditRows(jobId, _proofs(jobId, n, passed, unit, _range(k)));
+            vm.stopPrank();
             _voteAll(roundId, steps);
 
             vm.warp(block.timestamp + 24 hours);
@@ -147,9 +148,10 @@ contract EscrowTest is Base {
         RowSplit.Verdict memory v = _verdict(jobId, 10, 10, UNIT, 0);
         _seal(v);
         vm.warp(block.timestamp + 2 hours);
+        bytes memory sig = _sign(checkerPk, v);
         vm.prank(keeper);
         vm.expectRevert(JellyJob.AlreadyExpired.selector);
-        split.settle(jobId, v, _sign(checkerPk, v));
+        split.settle(jobId, v, sig);
     }
 
     function test_jobLifetimeIsCappedAt24Hours() public {
@@ -182,9 +184,10 @@ contract EscrowTest is Base {
         job.fundFor(openJob, client, client, "");
         vm.stopPrank();
 
+        bytes memory sig = _sign(checkerPk, v);
         vm.prank(keeper);
         vm.expectRevert(RowSplit.Halted.selector);
-        split.settle(fundedJob, v, _sign(checkerPk, v));
+        split.settle(fundedJob, v, sig);
 
         vm.warp(block.timestamp + 24 hours);
         split.finalize(settledJob); // never blocked
@@ -240,33 +243,37 @@ contract EscrowTest is Base {
         uint256 jobId = _openFunded(10, UNIT, BASE, 0);
         RowSplit.Verdict memory v = _verdict(jobId, 10, 10, UNIT, 0);
         _seal(v);
+        bytes memory badSig = _sign(pk, v);
         vm.prank(keeper);
         vm.expectRevert(RowSplit.BadSigner.selector);
-        split.settle(jobId, v, _sign(pk, v));
+        split.settle(jobId, v, badSig);
     }
 
     function test_settle_rejectsUnbondedOrExitingSigners() public {
         uint256 jobId = _openFunded(10, UNIT, BASE, 0);
         RowSplit.Verdict memory v = _verdict(jobId, 10, 10, UNIT, 0);
         _seal(v);
+        bytes memory unbondedSig = _sign(0xDEAD, v);
         vm.prank(keeper);
         vm.expectRevert(RowSplit.BadSigner.selector);
-        split.settle(jobId, v, _sign(0xDEAD, v));
+        split.settle(jobId, v, unbondedSig);
 
         vm.prank(checker);
         bond.requestExit();
+        bytes memory exitingSig = _sign(checkerPk, v);
         vm.prank(keeper);
         vm.expectRevert(RowSplit.BadSigner.selector);
-        split.settle(jobId, v, _sign(checkerPk, v));
+        split.settle(jobId, v, exitingSig);
     }
 
     function test_settle_rejectsBadVerdicts() public {
         uint256 jobId = _openFunded(10, UNIT, BASE, 100);
         RowSplit.Verdict memory good = _verdict(jobId, 10, 10, UNIT, 0);
 
+        bytes memory unsealedSig = _sign(checkerPk, good);
         vm.prank(keeper); // receipts not sealed yet
         vm.expectRevert(RowSplit.NotSealed.selector);
-        split.settle(jobId, good, _sign(checkerPk, good));
+        split.settle(jobId, good, unsealedSig);
         _seal(good);
 
         RowSplit.Verdict memory v = _verdict(jobId, 10, 10, UNIT, 0);
@@ -282,25 +289,29 @@ contract EscrowTest is Base {
         _expectBadVerdict(jobId, v);
         v = _verdict(jobId, 10, 10, UNIT, 0);
         v.receiptsRoot = bytes32(uint256(2)); // not what was sealed
+        bytes memory unsealedSig2 = _sign(checkerPk, v);
         vm.prank(keeper);
         vm.expectRevert(RowSplit.NotSealed.selector);
-        split.settle(jobId, v, _sign(checkerPk, v));
+        split.settle(jobId, v, unsealedSig2);
 
+        bytes memory goodSig = _sign(checkerPk, good);
         vm.prank(stranger); // not the keeper
         vm.expectRevert(RowSplit.NotAllowed.selector);
-        split.settle(jobId, good, _sign(checkerPk, good));
+        split.settle(jobId, good, goodSig);
 
         vm.prank(keeper);
-        split.settle(jobId, good, _sign(checkerPk, good));
+        split.settle(jobId, good, goodSig);
+        bytes memory goodSig2 = _sign(checkerPk, good);
         vm.prank(keeper); // only once
         vm.expectRevert(RowSplit.BadState.selector);
-        split.settle(jobId, good, _sign(checkerPk, good));
+        split.settle(jobId, good, goodSig2);
     }
 
     function _expectBadVerdict(uint256 jobId, RowSplit.Verdict memory v) private {
+        bytes memory sig = _sign(checkerPk, v);
         vm.prank(keeper);
         vm.expectRevert(RowSplit.BadVerdict.selector);
-        split.settle(jobId, v, _sign(checkerPk, v));
+        split.settle(jobId, v, sig);
     }
 
     function test_onlyTheQuoterOpensJobs_andAJobCannotBeFundedWithADifferentBudget() public {
@@ -355,8 +366,9 @@ contract EscrowTest is Base {
     function test_finalize_waitsForOpenRounds() public {
         uint256 jobId = _openFunded(10, UNIT, BASE, 0);
         _settle(jobId, 10, 10, UNIT, 0);
-        vm.prank(keeper);
+        vm.startPrank(keeper);
         uint256 roundId = split.auditRows(jobId, _proofs(jobId, 10, 10, UNIT, _range(2)));
+        vm.stopPrank();
 
         vm.warp(block.timestamp + 24 hours);
         vm.expectRevert(RowSplit.RoundsOpen.selector);

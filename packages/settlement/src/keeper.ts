@@ -8,6 +8,8 @@ export type KeeperDeps = {
   classify: ClassifyDeps;
   now?: () => number;
   onEvent?: (e: KeeperEvent) => void;
+  /** §11.4: fires once a job reaches "finalized", so a referral payout can check whether it qualifies. */
+  onFinalized?: (jobKey: `0x${string}`) => Promise<void>;
 };
 
 export type KeeperEvent =
@@ -68,6 +70,7 @@ export class SettlementKeeper {
     const { tx } = await escrow.finalize(job.jobId);
     await store.updateJob(job.jobKey, { state: "finalized", finalizeTx: tx, finalizedAtMs: this.now() });
     this.deps.onEvent?.({ type: "finalized", jobKey: job.jobKey, tx });
+    await this.deps.onFinalized?.(job.jobKey);
   }
 }
 

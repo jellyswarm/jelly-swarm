@@ -1,5 +1,14 @@
 {
   "extends": "../../tsconfig.base.json",
   "include": ["src", "drizzle.config.ts"],
-  "references": [{ "path": "../shared" }]
+  "references": [
+    { "path": "../shared" },
+    { "path": "../auth" },
+    { "path": "../checker" },
+    { "path": "../engine" },
+    { "path": "../merger" },
+    { "path": "../receipts" },
+    { "path": "../service" },
+    { "path": "../templates" }
+  ]
 }

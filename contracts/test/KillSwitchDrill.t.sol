@@ -60,9 +60,10 @@ contract KillSwitchDrillTest is Base {
         vm.prank(guardian);
         halt.halt();
 
+        bytes memory sig = _sign(checkerPk, v);
         vm.prank(keeper);
         vm.expectRevert(RowSplit.Halted.selector);
-        split.settle(jobId, v, _sign(checkerPk, v));
+        split.settle(jobId, v, sig);
     }
 
     // ───────────────────────── never blocked while halted ─────────────────────────

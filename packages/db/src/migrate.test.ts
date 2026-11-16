@@ -48,6 +48,7 @@ describe.skipIf(!reachable)("migrations against Postgres", () => {
     estCostUsd6: 330_000n,
     signature: "0x00",
     expiresAt: new Date(Date.now() + 600_000),
+    extra: {},
   });
 
   test("the database refuses a quote above 247 agents", async () => {

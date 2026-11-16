@@ -237,7 +237,7 @@ export class MemoryEscrow implements Escrow {
     const j = this.job(jobId);
     if (j.status !== "settled") throw new Error("job is not settled");
     const releaseAtSec = this.releaseAtSecByJob.get(jobId);
-    if (releaseAtSec !== undefined && this.now() / 1000 >= releaseAtSec) throw new Error("dispute window is closed");
+    if (releaseAtSec !== undefined && this.now() / 1000 > releaseAtSec) throw new Error("dispute window is closed");
     const roundId = this.nextRoundId++;
     this.rounds.set(roundId, { jobId, rowIdx, resolved: false });
     this.openRoundsByJob.set(jobId, (this.openRoundsByJob.get(jobId) ?? 0) + 1);

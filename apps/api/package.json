@@ -16,6 +16,7 @@
     "@jelly/engine": "workspace:*",
     "@jelly/fetcher": "workspace:*",
     "@jelly/gateway": "workspace:*",
+    "@jelly/keeper": "workspace:*",
     "@jelly/live": "workspace:*",
     "@jelly/merger": "workspace:*",
     "@jelly/policy": "workspace:*",

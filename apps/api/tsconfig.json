@@ -13,6 +13,7 @@
     { "path": "../../packages/db" },
     { "path": "../../packages/fetcher" },
     { "path": "../../packages/gateway" },
+    { "path": "../keeper" },
     { "path": "../../packages/live" },
     { "path": "../../packages/merger" },
     { "path": "../../packages/policy" },

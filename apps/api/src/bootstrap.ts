@@ -1,14 +1,18 @@
+import { randomBytes } from "node:crypto";
+import { AuthService, RealPasskeyVerifier } from "@jelly/auth";
 import { RedisBudgetStore } from "@jelly/budget-guard";
 import { Checker } from "@jelly/checker";
-import { PgAccountStore, PgJobStore, PgWatchStore, createDb } from "@jelly/db";
+import { PgAccountStore, PgJobStore, PgSessionStore, PgWatchStore, createDb } from "@jelly/db";
 import { Engine, JobGuards, Quoter, RedisSemaphore, runRow } from "@jelly/engine";
 import { Fetcher } from "@jelly/fetcher";
 import { Gateway, type HostInput, OpenAICompatProvider } from "@jelly/gateway";
+import { startKeeper } from "@jelly/keeper";
 import { InMemoryEventBus } from "@jelly/live";
 import { Merger } from "@jelly/merger";
 import { ReceiptChain } from "@jelly/receipts";
 import { type Escrow, JobService, MemoryEscrow, ViemEscrow, type ViemEscrowAddresses } from "@jelly/service";
 import { loadInfraEnv } from "@jelly/shared";
+import { NullFundingGraph } from "@jelly/settlement";
 import { MemoryTemplateRegistry } from "@jelly/templates";
 import { EvmChainReader, EvmOnlyAccountInspector, WORKER_MANIFEST, WorkerTools } from "@jelly/tools";
 import { FallbackFacilitator, LocalEvmFacilitator, RedisNonceStore } from "@jelly/x402";
@@ -40,7 +44,20 @@ export async function buildApp() {
   // ── infra ──
   const { db } = createDb(env.DATABASE_URL);
   const redis = new Redis(env.REDIS_URL, { maxRetriesPerRequest: 3 });
-  new PgAccountStore(db); // constructed for parity with the other real stores; also unused until auth routes exist (see class comment above).
+
+  // ── sign-in: passkey, email link, external wallet (§10.1) ──
+  const authOrigin = process.env.AUTH_ORIGIN ?? "http://localhost:4173";
+  const authRpId = process.env.AUTH_RP_ID ?? new URL(authOrigin).hostname;
+  const auth = new AuthService({
+    accounts: new PgAccountStore(db),
+    sessions: new PgSessionStore(db),
+    passkeyVerifier: new RealPasskeyVerifier(),
+    deviceSecret: process.env.DEVICE_SECRET ?? devSecret("DEVICE_SECRET", warnings),
+    emailPepper: process.env.EMAIL_PEPPER ?? devSecret("EMAIL_PEPPER", warnings),
+    siweDomain: process.env.AUTH_SIWE_DOMAIN ?? authRpId,
+    rpId: authRpId,
+    origin: authOrigin,
+  });
 
   // ── model routing ──
   const signerKey = requireHex("SIGNER_PRIVATE_KEY", process.env.SIGNER_PRIVATE_KEY);
@@ -155,6 +172,18 @@ export async function buildApp() {
     corsOrigins: (process.env.CORS_ORIGINS ?? "http://localhost:4173,http://127.0.0.1:4173").split(",").map((s) => s.trim()).filter(Boolean),
     devFunding,
     watches,
+    auth,
+  });
+
+  // ── settlement-keeper: finalize, audit sampling, and the referral/volume hooks nothing else calls ──
+  const keeper = startKeeper({
+    store,
+    escrow,
+    classify: { studioWallets: new Set(), graph: new NullFundingGraph() },
+    onEvent: (e) => {
+      if (e.type === "finalized") service.onJobFinalized(e.jobKey).catch((err) => console.error("[bootstrap] onJobFinalized failed:", err));
+      if (e.type === "keeper_error") console.error("[bootstrap] settlement-keeper tick failed:", e.error);
+    },
   });
 
   for (const w of warnings) console.warn(`[bootstrap] ${w}`);
@@ -162,6 +191,7 @@ export async function buildApp() {
     app,
     websocket,
     close: async () => {
+      keeper.stop();
       redis.disconnect();
     },
   };
@@ -174,6 +204,12 @@ const BUDGET_LIMITS = {
   globalDayMicros: 50_000_000_000_000n,
   freeTierDayMicros: 500_000_000_000n,
 };
+
+/** A random per-process secret, so this starts without the env var set. Every session and email-link token issued before a restart becomes invalid after one — fine for dev, never for production. */
+function devSecret(name: string, warnings: string[]): string {
+  warnings.push(`${name} is not set: using a random secret for this process only. Sessions and email links issued before a restart will not survive one.`);
+  return randomBytes(32).toString("hex");
+}
 
 function requireHex(name: string, value: string | undefined): Hex {
   if (!value || !/^0x[0-9a-fA-F]{64}$/.test(value)) {

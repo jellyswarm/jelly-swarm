@@ -433,6 +433,25 @@ export const freeGrants = pgTable(
   ],
 );
 
+/**
+ * Picket watch drafts (§11.3's "watch starters", §12.1). This is storage
+ * only: there is no watch engine yet (nothing checks `target` against
+ * `condition`), no billing, and no alerts. A watch here is exactly a saved
+ * request, same honesty the product's own copy already gives it elsewhere.
+ */
+export const watches = pgTable(
+  "watches",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // @jelly/service's own account-id space; see the comment on quotes.accountId above.
+    accountId: text("account_id").notNull(),
+    target: text("target").notNull(),
+    condition: text("condition").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("watches_account_idx").on(t.accountId, t.createdAt)],
+);
+
 // ───────────────────── compute, money and the meter ─────────────────────
 
 export const operators = pgTable("operators", {

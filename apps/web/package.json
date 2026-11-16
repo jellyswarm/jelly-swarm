@@ -5,7 +5,7 @@
   "description": "JellySwarm website frontend and dashboard handoff",
   "scripts": {
     "build": "node build.cjs",
-    "serve": "python3 -m http.server 4173"
+    "serve": "bun run serve.ts"
   },
   "dependencies": {
     "framer-motion": "12.43.0",

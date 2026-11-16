@@ -6,6 +6,7 @@ export * as schema from "./schema";
 export * from "./account-store";
 export * from "./job-store";
 export * from "./session-store";
+export * from "./watch-store";
 
 export type Db = ReturnType<typeof createDb>["db"];
 

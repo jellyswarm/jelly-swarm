@@ -1,6 +1,6 @@
 import { RedisBudgetStore } from "@jelly/budget-guard";
 import { Checker } from "@jelly/checker";
-import { PgAccountStore, PgJobStore, createDb } from "@jelly/db";
+import { PgAccountStore, PgJobStore, PgWatchStore, createDb } from "@jelly/db";
 import { Engine, JobGuards, Quoter, RedisSemaphore, runRow } from "@jelly/engine";
 import { Fetcher } from "@jelly/fetcher";
 import { Gateway, type HostInput, OpenAICompatProvider } from "@jelly/gateway";
@@ -113,6 +113,7 @@ export async function buildApp() {
   const bus = new InMemoryEventBus();
   const templates = new MemoryTemplateRegistry();
   const semaphore = new RedisSemaphore(redis);
+  const watches = new PgWatchStore(db);
 
   const service = new JobService({
     quoter,
@@ -137,6 +138,10 @@ export async function buildApp() {
   );
   const nonces = new RedisNonceStore(redis);
 
+  const devFunding = escrow instanceof MemoryEscrow;
+  if (devFunding) {
+    warnings.push("Dev-only funding is enabled (POST /v1/jobs/:key/dev-fund): escrow is MemoryEscrow, so this moves no real money.");
+  }
   const app = createApp({
     service,
     escrow,
@@ -147,6 +152,9 @@ export async function buildApp() {
     publicUrl: process.env.PUBLIC_URL ?? "http://localhost:3000",
     onError: (e) => console.error("[api] internal error:", e),
     stats: { store, studioOperated: true },
+    corsOrigins: (process.env.CORS_ORIGINS ?? "http://localhost:4173,http://127.0.0.1:4173").split(",").map((s) => s.trim()).filter(Boolean),
+    devFunding,
+    watches,
   });
 
   for (const w of warnings) console.warn(`[bootstrap] ${w}`);

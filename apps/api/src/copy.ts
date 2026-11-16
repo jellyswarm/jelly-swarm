@@ -12,6 +12,8 @@ export const COPY = {
   x402Job: "Runs one JellySwarm job: up to 247 agents work through your list, and rows that fail checking are refunded.",
   x402TopUp: "Adds to a prepaid JellySwarm balance. The owner can withdraw it at any time.",
   replayed: "This payment authorization was already used. Sign a new one.",
+  watchNotFound: "No watch with that id for this account.",
+  noPayer: "This job has no payer address to fund from.",
   agentName: "JellySwarm Fanout",
   agentDescription:
     "Give it a list and a question. Up to 247 open-model agents work through the list in parallel, an independent checker re-checks every row against its sources, and you pay only for rows that pass. The price is fixed before the job runs.",

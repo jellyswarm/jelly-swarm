@@ -1,9 +1,11 @@
 import { trpcServer } from "@hono/trpc-server";
+import type { WatchStore } from "@jelly/db";
 import type { EventBus } from "@jelly/live";
 import { type Account, type Escrow, type JobService, type JobStore, QuoteInput, ServiceError, type SignedGrant } from "@jelly/service";
 import { type BurnRecord, buildStats } from "@jelly/settlement";
 import { usd6 } from "@jelly/shared";
 import { createBunWebSocket } from "hono/bun";
+import { cors } from "hono/cors";
 import {
   type Facilitator,
   type NonceStore,
@@ -39,6 +41,22 @@ export type AppDeps = {
     burns?: () => Promise<readonly BurnRecord[]> | readonly BurnRecord[];
     now?: () => number;
   };
+  /** Origins allowed to call this API from a browser (e.g. the dashboard's own origin). Omit to allow none. */
+  corsOrigins?: readonly string[];
+  /**
+   * Exposes a same-shape stand-in for a real wallet signature: it marks a
+   * job funded directly, without any payment. Only meaningful (and only
+   * ever set) while `escrow` is `MemoryEscrow` — there is no real money for
+   * it to move. Never set this against a real chain.
+   */
+  devFunding?: boolean;
+  /**
+   * Powers /v1/watches (Picket, §11.3/§12.1). Storage only: saves and lists
+   * a watch request, same as the schema's own `watches` table comment —
+   * there is no watch engine yet, so nothing is ever actually monitored.
+   * Omit to serve none of these routes.
+   */
+  watches?: WatchStore;
 };
 
 type Env = { Variables: { account: Account } };
@@ -84,6 +102,10 @@ export { websocket };
 export function createApp(deps: AppDeps) {
   const { service, escrow } = deps;
   const app = new Hono<Env>();
+
+  if (deps.corsOrigins?.length) {
+    app.use("*", cors({ origin: [...deps.corsOrigins], allowHeaders: ["content-type", "authorization", "x-payment", "x-jelly-payer"], exposeHeaders: ["x-payment-response"] }));
+  }
 
   app.onError((e, c) => {
     if (e instanceof ServiceError) return c.json({ error: e.code, message: e.message }, STATUS[e.code]);
@@ -138,7 +160,11 @@ export function createApp(deps: AppDeps) {
    * so no event in between is missed or duplicated.
    */
   app.get("/v1/jobs/:key/events", async (c) => {
-    const account = await requireAccount(c);
+    // The browser's EventSource cannot set a custom header, so (like /v1/ws below) this also
+    // accepts the access key as a query parameter.
+    const authHeader = c.req.header("authorization") ?? (c.req.query("key") ? `Bearer ${c.req.query("key")}` : undefined);
+    const account = await accountFromRequest(service, authHeader);
+    if (!account) throw new ServiceError("forbidden", COPY.unauthorized);
     const jobKey = key(c);
     await service.status(account, jobKey); // ownership check; throws not_found otherwise
     const sinceSeq = Number(c.req.header("last-event-id") ?? c.req.query("sinceSeq") ?? "0") || 0;
@@ -175,6 +201,50 @@ export function createApp(deps: AppDeps) {
     const b = await body(c, DisputeBody);
     return c.json((await service.dispute(account, key(c), b.rowIdx, b.evidence)) as object, 201);
   });
+
+  /**
+   * Dev-only stand-in for a real wallet signature (see `devFunding` above):
+   * marks a prepared job funded directly. Only registered when `devFunding`
+   * is set, which only ever happens over `MemoryEscrow`.
+   */
+  if (deps.devFunding) {
+    app.post("/v1/jobs/:key/dev-fund", async (c) => {
+      const account = await requireAccount(c);
+      const jobKey = key(c);
+      await service.status(account, jobKey); // ownership check; throws not_found otherwise
+      const job = await deps.store.getJob(jobKey);
+      if (!job?.payer) throw new ServiceError("invalid", COPY.noPayer);
+      (escrow as unknown as { markFunded: (jobId: bigint, client: Address) => void }).markFunded(job.jobId, job.payer as Address);
+      return c.json({ ok: true });
+    });
+  }
+
+  // ───────────────────────── watches (Picket, storage only) ─────────────────────────
+
+  if (deps.watches) {
+    const watches = deps.watches;
+    /** Without a key, the caller is given one, same as /v1/quotes: this may be someone's first request. */
+    app.post("/v1/watches", async (c) => {
+      let account = await accountFromRequest(service, c.req.header("authorization"));
+      let accessKey: string | undefined;
+      if (!account) {
+        accessKey = (await service.issueAnonymousKey()).secret;
+        account = (await service.accountForKey(accessKey))!;
+      }
+      const b = await body(c, z.object({ target: z.string().min(1).max(200), condition: z.string().min(1).max(300) }));
+      const watch = await watches.putWatch(account.id, b.target, b.condition);
+      return c.json({ watch, ...(accessKey ? { accessKey, accessKeyNote: COPY.accessKeyNote } : {}) }, 201);
+    });
+
+    app.get("/v1/watches", async (c) => c.json({ watches: await watches.listWatches((await requireAccount(c)).id) }));
+
+    app.delete("/v1/watches/:id", async (c) => {
+      const account = await requireAccount(c);
+      const deleted = await watches.deleteWatch(account.id, c.req.param("id"));
+      if (!deleted) throw new ServiceError("not_found", COPY.watchNotFound);
+      return c.json({ ok: true });
+    });
+  }
 
   // ───────────────────────── x402 ─────────────────────────
 

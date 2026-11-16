@@ -6,6 +6,7 @@ import { type MockHandler, mockResponse } from "@jelly/gateway";
 import { InMemoryEventBus } from "@jelly/live";
 import { Merger } from "@jelly/merger";
 import { NO_TOOLS } from "@jelly/policy";
+import type { TemplateRegistry } from "@jelly/templates";
 import { keccak256, toBytes } from "viem";
 import { MemoryEscrow } from "./escrow";
 import { JobService } from "./service";
@@ -45,7 +46,7 @@ export const defaultHandler: MockHandler = (_host, req) => {
   return mockResponse({ content: SUMMARY, usage: { inputTokens: 100, cachedInputTokens: 0, outputTokens: 40 } });
 };
 
-export function makeService(over: { handler?: MockHandler; items?: string[] } = {}) {
+export function makeService(over: { handler?: MockHandler; items?: string[]; templates?: TemplateRegistry } = {}) {
   const clock = { now: 1_800_000_000_000 };
   const now = () => clock.now;
   const g = makeGateway(over.handler ?? defaultHandler);
@@ -107,6 +108,7 @@ export function makeService(over: { handler?: MockHandler; items?: string[] } = 
     verdictSigner: signer,
     spentMicros: async (jobKey) => (await g.budget.usage(jobBudgetKey(jobKey))).usedMicros,
     now,
+    ...(over.templates ? { templates: over.templates } : {}),
   });
 
   return { service, escrow, store, bus, clock, provider: g.provider, receipts: g.receipts };

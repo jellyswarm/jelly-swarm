@@ -79,6 +79,8 @@ export type StoredJob = {
   volumeRecordedAtMs?: number;
   /** A job the studio ran for its own QA, never real or external_small volume. Not set by any public path. */
   testJob?: boolean;
+  /** From the template that built this job, if any. §11.4: private and wallet-sweep jobs can never be shared beyond "private". */
+  safetyClass?: "public" | "crypto-readonly" | "private";
 };
 
 export type JobEvent = { seq: number; ts: number; type: string; payload: unknown };
@@ -92,6 +94,39 @@ export type StoredDispute = {
   evidence: string;
   createdAtMs: number;
 };
+
+export type ShareVisibility = "private" | "unlisted" | "public";
+
+/** §11.4 a frozen snapshot: CSV + Markdown + manifest, taken at share time. Bumping a template later never changes this. */
+export type ShareSnapshot = { csv: string; markdown: string; manifest: Record<string, unknown> };
+
+export type StoredShare = {
+  slug: string;
+  jobKey: Hex;
+  accountId: string;
+  visibility: ShareVisibility;
+  snapshot: ShareSnapshot;
+  /** The template version the job was built from, if any; shown next to "Run this again" when it has moved on. */
+  templateVersion?: number;
+  createdAtMs: number;
+};
+
+export type ReferralState = "pending" | "paid" | "blocked";
+
+export type StoredReferral = {
+  id: string;
+  refCode: string;
+  referrerAccountId: string;
+  refereeAccountId: string;
+  state: ReferralState;
+  blockReason?: string;
+  qualifyingJobKey?: Hex;
+  createdAtMs: number;
+};
+
+/** §10.3/§11.4 off-chain job credits: non-transferable, 90-day expiry, spendable on jobs only. */
+export type CreditReason = "referral_referrer" | "referral_referee_signup" | "holder_allowance" | "restore" | "spend" | "expire";
+export type StoredCreditEntry = { id: string; accountId: string; deltaUsd6: bigint; reason: CreditReason; jobKey?: Hex; createdAtMs: number; expiresAtMs?: number };
 
 export type StoredApiKey = {
   keyId: string;
@@ -128,6 +163,25 @@ export interface JobStore {
   putDispute(d: StoredDispute): Promise<void>;
   putApiKey(k: StoredApiKey): Promise<void>;
   getApiKeyByHash(secretHash: string): Promise<StoredApiKey | undefined>;
+
+  putShare(s: StoredShare): Promise<void>;
+  getShare(slug: string): Promise<StoredShare | undefined>;
+  updateShare(slug: string, patch: Partial<StoredShare>): Promise<StoredShare>;
+  listSharesForJob(jobKey: Hex): Promise<StoredShare[]>;
+
+  /** A referral is keyed by referee: one referee can only ever have been referred once (§11.4 "There is no merge by email lookup" applies the same spirit here). */
+  putReferral(r: StoredReferral): Promise<void>;
+  getReferralByReferee(refereeAccountId: string): Promise<StoredReferral | undefined>;
+  updateReferral(id: string, patch: Partial<StoredReferral>): Promise<StoredReferral>;
+  /** Paid referrals credited to `referrerAccountId` since `sinceMs`, for the monthly cap. */
+  countPaidReferralsSince(referrerAccountId: string, sinceMs: number): Promise<number>;
+  getReferralCode(accountId: string): Promise<string | undefined>;
+  putReferralCode(accountId: string, code: string): Promise<void>;
+  getAccountForReferralCode(code: string): Promise<string | undefined>;
+
+  addCredit(e: StoredCreditEntry): Promise<void>;
+  /** Sum of unexpired deltas at `nowMs`; spends (negative deltas) are never excluded by expiry. */
+  creditBalance(accountId: string, nowMs: number): Promise<bigint>;
 }
 
 export class MemoryJobStore implements JobStore {
@@ -136,6 +190,11 @@ export class MemoryJobStore implements JobStore {
   private readonly events = new Map<Hex, JobEvent[]>();
   readonly disputes: StoredDispute[] = [];
   private readonly apiKeys = new Map<string, StoredApiKey>();
+  private readonly shares = new Map<string, StoredShare>();
+  private readonly referralsByReferee = new Map<string, StoredReferral>();
+  private readonly referralCodes = new Map<string, string>(); // accountId -> code
+  private readonly referralCodeOwners = new Map<string, string>(); // code -> accountId
+  private readonly credits: StoredCreditEntry[] = [];
   constructor(private readonly now: () => number = Date.now) {}
 
   async putQuote(q: StoredQuote): Promise<void> {
@@ -214,5 +273,73 @@ export class MemoryJobStore implements JobStore {
 
   async getApiKeyByHash(secretHash: string): Promise<StoredApiKey | undefined> {
     return this.apiKeys.get(secretHash);
+  }
+
+  async putShare(s: StoredShare): Promise<void> {
+    this.shares.set(s.slug, s);
+  }
+
+  async getShare(slug: string): Promise<StoredShare | undefined> {
+    return this.shares.get(slug);
+  }
+
+  async updateShare(slug: string, patch: Partial<StoredShare>): Promise<StoredShare> {
+    const s = this.shares.get(slug);
+    if (!s) throw new Error(`unknown share ${slug}`);
+    const next = { ...s, ...patch };
+    this.shares.set(slug, next);
+    return next;
+  }
+
+  async listSharesForJob(jobKey: Hex): Promise<StoredShare[]> {
+    return [...this.shares.values()].filter((s) => s.jobKey === jobKey);
+  }
+
+  async putReferral(r: StoredReferral): Promise<void> {
+    this.referralsByReferee.set(r.refereeAccountId, r);
+  }
+
+  async getReferralByReferee(refereeAccountId: string): Promise<StoredReferral | undefined> {
+    return this.referralsByReferee.get(refereeAccountId);
+  }
+
+  async updateReferral(id: string, patch: Partial<StoredReferral>): Promise<StoredReferral> {
+    for (const [key, r] of this.referralsByReferee) {
+      if (r.id === id) {
+        const next = { ...r, ...patch };
+        this.referralsByReferee.set(key, next);
+        return next;
+      }
+    }
+    throw new Error(`unknown referral ${id}`);
+  }
+
+  async countPaidReferralsSince(referrerAccountId: string, sinceMs: number): Promise<number> {
+    return [...this.referralsByReferee.values()].filter(
+      (r) => r.referrerAccountId === referrerAccountId && r.state === "paid" && r.createdAtMs >= sinceMs,
+    ).length;
+  }
+
+  async getReferralCode(accountId: string): Promise<string | undefined> {
+    return this.referralCodes.get(accountId);
+  }
+
+  async putReferralCode(accountId: string, code: string): Promise<void> {
+    this.referralCodes.set(accountId, code);
+    this.referralCodeOwners.set(code, accountId);
+  }
+
+  async getAccountForReferralCode(code: string): Promise<string | undefined> {
+    return this.referralCodeOwners.get(code);
+  }
+
+  async addCredit(e: StoredCreditEntry): Promise<void> {
+    this.credits.push(e);
+  }
+
+  async creditBalance(accountId: string, nowMs: number): Promise<bigint> {
+    return this.credits
+      .filter((c) => c.accountId === accountId && (c.deltaUsd6 < 0n || c.expiresAtMs === undefined || c.expiresAtMs > nowMs))
+      .reduce((sum, c) => sum + c.deltaUsd6, 0n);
   }
 }

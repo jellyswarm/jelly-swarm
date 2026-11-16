@@ -18,12 +18,13 @@ import {
 import { type EventBus, TileCoalescer } from "@jelly/live";
 import { type Merger, toCsv, toJson, toMarkdown } from "@jelly/merger";
 import { type ReceiptChain, merkleProof } from "@jelly/receipts";
-import { ChainKey, DISPUTE_FEE_BPS, DISPUTE_MAX_ROWS, DISPUTE_MIN_FEE_USD6, MAX_AGENTS, Product, Tier, formatUsd6 } from "@jelly/shared";
+import type { TemplateRegistry } from "@jelly/templates";
+import { ChainKey, CREDITS, DISPUTE_FEE_BPS, DISPUTE_MAX_ROWS, DISPUTE_MIN_FEE_USD6, MAX_AGENTS, Product, Tier, formatUsd6 } from "@jelly/shared";
 import { type Address, type Hex, isAddress } from "viem";
 import { z } from "zod";
 import { COPY } from "./copy";
 import type { Escrow, SignedGrant, UnsignedCall } from "./escrow";
-import type { Account, JobEvent, JobStore, StoredJob, StoredQuote } from "./store";
+import type { Account, JobEvent, JobStore, ReferralState, ShareVisibility, StoredJob, StoredQuote, StoredReferral, StoredShare } from "./store";
 
 export type ServiceErrorCode = "not_found" | "invalid" | "expired" | "not_ready" | "payment_required" | "forbidden";
 
@@ -102,6 +103,8 @@ export type ServiceDeps = {
   /** §11.2 fan-out for live subscribers (SSE/WebSocket). Every emitted event is also persisted via `store.appendEvent`. */
   bus: EventBus;
   verdictSigner: VerdictSigner;
+  /** §11.3/§11.4: when a quote names a templateId, its current version is recorded on the spec and later on any share. */
+  templates?: TemplateRegistry;
   /** The operator credited for a host's work. Until outside operators exist, every host is ours. */
   operatorOf?: (hostId: string) => bigint;
   workerOperatorId?: bigint;
@@ -170,6 +173,9 @@ export class JobService {
     if (!input.items?.length || !input.columns?.length) throw new ServiceError("invalid", COPY.itemsRequired);
     if (input.chain !== this.deps.escrow.chain) throw new ServiceError("invalid", COPY.wrongChain);
 
+    const templateVersion = input.templateId
+      ? (await this.deps.templates?.current(input.templateId))?.version
+      : undefined;
     const spec = JobSpec.safeParse({
       product: input.product,
       task: input.task,
@@ -178,6 +184,7 @@ export class JobService {
       tier: input.tier,
       maxAgents: input.maxAgents,
       ...(input.templateId ? { templateId: input.templateId } : {}),
+      ...(templateVersion !== undefined ? { templateVersion } : {}),
       ...(input.premiumPlanner !== undefined ? { premiumPlanner: input.premiumPlanner } : {}),
     });
     if (!spec.success) throw new ServiceError("invalid", spec.error.issues[0]?.message ?? COPY.itemsRequired);
@@ -648,5 +655,189 @@ export class JobService {
   async accountForKey(secret: string): Promise<Account | null> {
     const key = await this.deps.store.getApiKeyByHash(hashSecret(secret));
     return key ? { id: key.accountId, tier: "paid" } : null;
+  }
+
+  // ───────────────────────── share links (§11.4) ─────────────────────────
+
+  private buildManifest(job: StoredJob, quote: StoredQuote | undefined): Record<string, unknown> {
+    return {
+      jobKey: job.jobKey,
+      chain: job.chain,
+      specHash: quote?.quote.specHash,
+      quoteSig: quote?.signature,
+      root: job.seal?.root,
+      count: job.seal?.count,
+      head: job.seal?.head,
+      sealTx: job.sealTx,
+      settleTx: job.settleTx,
+      verdictSig: job.verdict?.signature,
+      rowsRoot: job.verdict?.verdict.rowsRoot,
+    };
+  }
+
+  /** §11.4: a wallet-sweep job, or one built from a template marked private, can never be anything but private. */
+  private maxVisibilityFor(job: StoredJob): "private" | "unlisted" | "public" {
+    return job.walletJob || job.safetyClass === "private" ? "private" : "public";
+  }
+
+  private checkVisibility(job: StoredJob, visibility: ShareVisibility): void {
+    const max = this.maxVisibilityFor(job);
+    if (max === "private" && visibility !== "private") throw new ServiceError("invalid", COPY.shareTooPrivate);
+  }
+
+  /** Creates a share at a random slug, with a frozen snapshot of the finished job. */
+  async createShare(account: Account, jobKey: Hex, visibility: ShareVisibility): Promise<{ slug: string; visibility: ShareVisibility }> {
+    const job = await this.owned(account, jobKey);
+    if (!job.table) throw new ServiceError("not_ready", COPY.shareNotReady);
+    this.checkVisibility(job, visibility);
+    const quote = await this.deps.store.getQuote(job.quoteId);
+
+    const slug = randomBytes(6).toString("base64url").slice(0, 10);
+    const share: StoredShare = {
+      slug,
+      jobKey,
+      accountId: account.id,
+      visibility,
+      snapshot: { csv: toCsv(job.table), markdown: toMarkdown(job.table), manifest: this.buildManifest(job, quote) },
+      ...(job.spec.templateVersion !== undefined ? { templateVersion: job.spec.templateVersion } : {}),
+      createdAtMs: this.now(),
+    };
+    await this.deps.store.putShare(share);
+    return { slug, visibility };
+  }
+
+  async setShareVisibility(account: Account, slug: string, visibility: ShareVisibility): Promise<void> {
+    const share = await this.deps.store.getShare(slug);
+    if (!share || share.accountId !== account.id) throw new ServiceError("not_found", COPY.shareNotFound);
+    const job = await this.owned(account, share.jobKey);
+    this.checkVisibility(job, visibility);
+    await this.deps.store.updateShare(slug, { visibility });
+  }
+
+  /** Public read: a private share is visible only to its owner; unlisted and public shares are visible to anyone who has the link. */
+  async getShare(slug: string, account?: Account): Promise<{ visibility: ShareVisibility; snapshot: StoredShare["snapshot"]; jobKey: Hex }> {
+    const share = await this.deps.store.getShare(slug);
+    if (!share) throw new ServiceError("not_found", COPY.shareNotFound);
+    if (share.visibility === "private" && share.accountId !== account?.id) throw new ServiceError("not_found", COPY.shareNotFound);
+    return { visibility: share.visibility, snapshot: share.snapshot, jobKey: share.jobKey };
+  }
+
+  /** §11.4 "Run this again": a fresh quote for the shared job's own spec, at current prices. */
+  async rerunShare(account: Account, slug: string): Promise<QuoteView> {
+    const share = await this.deps.store.getShare(slug);
+    if (!share) throw new ServiceError("not_found", COPY.shareNotFound);
+    const job = await this.deps.store.getJob(share.jobKey);
+    if (!job) throw new ServiceError("not_found", COPY.notFound);
+    return this.quote(account, {
+      product: job.spec.product,
+      task: job.spec.task,
+      items: job.spec.items.map((i) => i.raw),
+      columns: job.spec.columns,
+      tier: job.spec.tier,
+      maxAgents: job.spec.maxAgents,
+      chain: job.chain,
+      ...(job.spec.templateId ? { templateId: job.spec.templateId } : {}),
+    });
+  }
+
+  // ───────────────────────── referrals and credits (§11.4, §10.3) ─────────────────────────
+
+  /** A stable code for this account, minted the first time it is asked for. */
+  async referralCode(account: Account): Promise<string> {
+    const existing = await this.deps.store.getReferralCode(account.id);
+    if (existing) return existing;
+    const code = randomBytes(5).toString("base64url").slice(0, 7);
+    await this.deps.store.putReferralCode(account.id, code);
+    return code;
+  }
+
+  /**
+   * Registers that `referee` arrived on `refCode`. Blocks that look like
+   * self-referral (§11.4: shared device, shared IP prefix within 24h, or a
+   * shared funding graph within 3 hops) are recorded but never credited;
+   * `signals` is computed by the caller, which is the layer with the
+   * device/IP/funding-graph context this package deliberately does not
+   * depend on. The referee's $0.50 signup credit, if any, is granted here,
+   * immediately; the referrer's $1 waits for a qualifying job (`onJobFinalized`).
+   */
+  async registerReferral(
+    referee: Account,
+    refCode: string,
+    signals: { sameDevice: boolean; sameIpPrefix: boolean; fundingLinked: boolean },
+  ): Promise<{ state: ReferralState; blockReason?: string }> {
+    if (await this.deps.store.getReferralByReferee(referee.id)) throw new ServiceError("invalid", COPY.referralAlreadyUsed);
+    const referrerAccountId = await this.deps.store.getAccountForReferralCode(refCode);
+    if (!referrerAccountId || referrerAccountId === referee.id) {
+      throw new ServiceError("invalid", COPY.referralSelf);
+    }
+
+    const blockReason = signals.sameDevice
+      ? "shared device"
+      : signals.sameIpPrefix
+        ? "shared IP prefix within 24h"
+        : signals.fundingLinked
+          ? "shared funding graph within 3 hops"
+          : undefined;
+    const state: ReferralState = blockReason ? "blocked" : "pending";
+    const referral: StoredReferral = {
+      id: randomUUID(),
+      refCode,
+      referrerAccountId,
+      refereeAccountId: referee.id,
+      state,
+      ...(blockReason ? { blockReason } : {}),
+      createdAtMs: this.now(),
+    };
+    await this.deps.store.putReferral(referral);
+
+    if (!blockReason) {
+      await this.deps.store.addCredit({
+        id: randomUUID(),
+        accountId: referee.id,
+        deltaUsd6: CREDITS.refereeUsd6,
+        reason: "referral_referee_signup",
+        createdAtMs: this.now(),
+        expiresAtMs: this.now() + CREDITS.expiryMs,
+      });
+    }
+    return { state, ...(blockReason ? { blockReason } : {}) };
+  }
+
+  /**
+   * Call once a job finishes settling (state "finalized" or "refunded" with
+   * at least one passed row), so the referrer's credit can fire on the
+   * referee's *first* qualifying paid job (§11.4: external funder, ≥ $1).
+   * Safe to call for every job; it is a no-op unless all the conditions hold.
+   */
+  async onJobFinalized(jobKey: Hex): Promise<void> {
+    const job = await this.deps.store.getJob(jobKey);
+    if (!job || !job.amounts) return;
+    const gross = job.amounts.grossUsd6 + job.amounts.toolsBilledUsd6;
+    if (gross < CREDITS.minPaidJobUsd6) return;
+    if (job.route === "free" || job.route === "credits") return; // not an externally-funded job
+
+    const referral = await this.deps.store.getReferralByReferee(job.accountId);
+    if (!referral || referral.state !== "pending") return;
+
+    const monthAgo = this.now() - 30 * 24 * 3600 * 1000;
+    if ((await this.deps.store.countPaidReferralsSince(referral.referrerAccountId, monthAgo)) >= CREDITS.referralCapPerMonth) {
+      await this.deps.store.updateReferral(referral.id, { state: "blocked", blockReason: "referrer's monthly cap reached" });
+      return;
+    }
+
+    await this.deps.store.addCredit({
+      id: randomUUID(),
+      accountId: referral.referrerAccountId,
+      deltaUsd6: CREDITS.referrerUsd6,
+      reason: "referral_referrer",
+      jobKey,
+      createdAtMs: this.now(),
+      expiresAtMs: this.now() + CREDITS.expiryMs,
+    });
+    await this.deps.store.updateReferral(referral.id, { state: "paid", qualifyingJobKey: jobKey });
+  }
+
+  async creditBalance(account: Account): Promise<string> {
+    return formatUsd6(await this.deps.store.creditBalance(account.id, this.now()));
   }
 }

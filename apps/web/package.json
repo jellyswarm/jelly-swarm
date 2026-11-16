@@ -1,0 +1,19 @@
+{
+  "name": "jellyswarm-website",
+  "version": "1.0.0",
+  "private": true,
+  "description": "JellySwarm website frontend and dashboard handoff",
+  "scripts": {
+    "build": "node build.cjs",
+    "serve": "python3 -m http.server 4173"
+  },
+  "dependencies": {
+    "framer-motion": "12.43.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12"
+  },
+  "engines": { "node": ">=20" }
+}

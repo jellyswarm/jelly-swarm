@@ -15,7 +15,7 @@ describe("schema hard rules (§0.1)", () => {
     for (const required of [
       "accounts", "passkeys", "email_logins", "devices", "wallets", "tg_links", "api_keys", "sessions",
       "quotes", "jobs", "rows", "receipts", "job_events", "disputes",
-      "templates", "template_versions", "share_links", "referrals", "credit_ledger", "free_grants",
+      "templates", "template_versions", "share_links", "referrals", "referral_codes", "credit_ledger", "free_grants",
       "operators", "node_audits", "payout_epochs", "burns", "meter_posts",
       "studio_wallets", "volume_ledger", "x402_payments",
     ]) {

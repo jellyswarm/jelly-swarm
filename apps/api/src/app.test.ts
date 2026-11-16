@@ -21,7 +21,14 @@ function makeTestApp(over: Parameters<typeof makeService>[0] = {}, withStats = f
     publicUrl: "https://api.jellyswarm.test",
     facilitator: {
       verify: async () => (verifyOk ? { isValid: true, payer: WALLET } : { isValid: false, invalidReason: "invalid_signature" }),
-      settle: async () => (settleOk ? { success: true, transaction: "0xpaid", payer: WALLET } : { success: false, errorReason: "settlement_failed" }),
+      // A real facilitator's settle() submits the transfer on-chain, so the forwarder's real
+      // balance goes up; MemoryEscrow has no real chain under it, so this mock credits it
+      // directly, standing in for that on-chain effect.
+      settle: async (_payment, req) => {
+        if (!settleOk) return { success: false, errorReason: "settlement_failed" };
+        s.escrow.pay(req.payTo as Address, BigInt(req.maxAmountRequired));
+        return { success: true, transaction: "0xpaid", payer: WALLET };
+      },
     },
     ...(withStats ? { stats: { store: s.store, studioOperated: true, now: () => s.clock.now } } : {}),
   });
@@ -167,7 +174,10 @@ describe("x402", () => {
   test("replaying the same payment authorization is refused", async () => {
     const t = makeTestApp();
     const { accessKey, quoteId: q1 } = await quoteAndKey(t, ["tok-0"]);
-    const { quoteId: q2 } = await quoteAndKey(t, ["tok-1"]);
+    // The same account's second quote, not a fresh anonymous one: the replay attempt below
+    // must be refused for replaying the payment, not merely for being a different account's quote.
+    const q2Res = await req(t.app, "/v1/quotes", { method: "POST", headers: auth(accessKey), json: { task: "x", items: ["tok-1"], columns: COLUMNS } });
+    const { quoteId: q2 } = (await q2Res.json()) as { quoteId: string };
     const first402 = await req(t.app, "/v1/x402/jobs", { method: "POST", headers: { ...auth(accessKey), "x-jelly-payer": WALLET }, json: { quoteId: q1 } });
     const { accepts } = (await first402.json()) as { accepts: { payTo: Address; maxAmountRequired: string }[] };
     const payment = await signedPayment(accepts[0]!.payTo, accepts[0]!.maxAmountRequired);
@@ -210,6 +220,7 @@ describe("/stats", () => {
     await req(t.app, `/v1/jobs/${job.jobKey}/confirm`, { method: "POST", headers: auth(accessKey) });
     await t.service.finished(job.jobKey);
     await t.store.updateJob(job.jobKey, { state: "finalized", meterBucket: "real" });
+    t.clock.now += 1000; // the stats window's upper bound is exclusive, same as a real "now" always being after a job's createdAtMs
 
     for (const path of ["/stats", "/stats.json"]) {
       const res = await req(t.app, path);
@@ -330,10 +341,17 @@ describe("live progress: SSE (§11.2)", () => {
     const res = await req(t.app, `/v1/jobs/${job.jobKey}/events`, { headers: auth(accessKey) });
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
-    const read = reader.read();
+    // The stream replays what is already persisted (at least "job.quoted") before this
+    // publish reaches it live; drain reads until the live event shows up, or time out.
     t.bus.publish(job.jobKey, { seq: 99, ts: Date.now(), type: "eta", payload: { sec: 5 } });
-    const { value } = await read;
-    expect(decoder.decode(value)).toContain("event: eta");
+    let seen = "";
+    const deadline = Date.now() + 500;
+    while (!seen.includes("event: eta") && Date.now() < deadline) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      seen += decoder.decode(value);
+    }
+    expect(seen).toContain("event: eta");
     await reader.cancel();
   });
 });

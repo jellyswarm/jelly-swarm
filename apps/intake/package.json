@@ -5,5 +5,20 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@jelly/engine": "workspace:*",
+    "@jelly/gateway": "workspace:*",
+    "@jelly/policy": "workspace:*",
+    "@jelly/receipts": "workspace:*",
+    "@jelly/shared": "workspace:*",
+    "viem": "^2.57.20",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@jelly/budget-guard": "workspace:*",
+    "@jelly/checker": "workspace:*",
+    "@jelly/fetcher": "workspace:*",
+    "@jelly/tools": "workspace:*"
   }
 }

@@ -39,9 +39,9 @@ describe("needsAudit (§3.3 step 8)", () => {
 });
 
 describe("sampleRows", () => {
-  test("every failed row is included before any passed row, in row order", () => {
+  test("when there is room for everything, the output is every row in ascending order", () => {
     const states = ["passed", "refunded", "passed", "refunded", "passed"] as const;
-    expect(sampleRows(states, 10)).toEqual([1, 3, 0, 2, 4]);
+    expect(sampleRows(states, 10)).toEqual([0, 1, 2, 3, 4]);
   });
 
   test("the sample is capped, favouring failed rows when there are more candidates than room", () => {

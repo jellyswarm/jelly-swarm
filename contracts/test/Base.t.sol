@@ -218,8 +218,12 @@ abstract contract Base is Test {
     function _settle(uint256 jobId, uint32 n, uint32 passed, uint64 unit, uint64 tools) internal {
         RowSplit.Verdict memory v = _verdict(jobId, n, passed, unit, tools);
         _seal(v);
-        vm.prank(keeper);
+        // vm.prank only covers the single next call, and _sign() makes its own staticcall
+        // (verdictDigest) to compute the signature — so the prank must stay active through
+        // that call too, or it gets consumed before settle() ever runs.
+        vm.startPrank(keeper);
         split.settle(jobId, v, _sign(checkerPk, v));
+        vm.stopPrank();
     }
 
     function _proofs(uint256 jobId, uint32 n, uint32 passed, uint64 unit, uint32[] memory idx)

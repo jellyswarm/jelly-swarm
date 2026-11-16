@@ -97,14 +97,11 @@ describe("fund and run", () => {
     expect(s.escrow.sealed.get(jobKey)?.root).toBe(settled.verdict.receiptsRoot);
 
     const status = await s.service.status(ALICE, jobKey);
-    expect(status.events.map((e) => e.type)).toEqual([
-      "job.quoted",
-      "job.funded",
-      "wave.started",
-      "job.merged",
-      "job.sealed",
-      "job.settled",
-    ]);
+    // §11.2 added tile/eta/cost telemetry around these milestones (covered by its own
+    // tests); this checks only that the milestones themselves land in the right order.
+    const types = status.events.map((e) => e.type);
+    const milestones = types.filter((t) => t.startsWith("job.") || t === "wave.started");
+    expect(milestones).toEqual(["job.quoted", "job.funded", "wave.started", "job.merged", "job.sealed", "job.settled"]);
     expect(status.spentUsd).toBeDefined();
     expect((await s.service.status(ALICE, jobKey, status.nextSeq)).events).toEqual([]);
   });

@@ -19,4 +19,10 @@ export const COPY = {
   disputeRows: "Name between 1 and 25 rows that passed, each once.",
   runFailed: "The job could not be completed. Your payment is returned when the job expires.",
   keyInactive: "This key is not active yet. Sign the spend grant to activate it.",
+  shareNotReady: "This job has no result to share yet.",
+  shareTooPrivate: "A wallet job can only be shared privately with the people you choose.",
+  shareNotFound: "This link does not point to a job you can see.",
+  referralSelf: "This looks like a self-referral, so no credit was given.",
+  referralAlreadyUsed: "This account already has a referral on record.",
+  referralCapReached: "You have reached this month's referral credit limit.",
 } as const;

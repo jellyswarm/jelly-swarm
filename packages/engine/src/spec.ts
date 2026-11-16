@@ -40,6 +40,8 @@ export const JobSpec = z
   .object({
     product: Product,
     templateId: z.string().optional(),
+    /** The template's current version at quote time (§11.3 "the change is shown on the quote"), if templateId was consulted against a registry. */
+    templateVersion: z.number().int().positive().optional(),
     /** Plain words from the user. Stored as data; never part of a system prompt. */
     task: z.string().min(1).max(4000),
     items: z.array(Item).min(1).max(MAX_ITEMS),

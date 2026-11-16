@@ -1,4 +1,5 @@
 import { trpcServer } from "@hono/trpc-server";
+import { AuthError, type AuthService } from "@jelly/auth";
 import type { WatchStore } from "@jelly/db";
 import type { EventBus } from "@jelly/live";
 import { type Account, type Escrow, type JobService, type JobStore, QuoteInput, ServiceError, type SignedGrant } from "@jelly/service";
@@ -57,6 +58,8 @@ export type AppDeps = {
    * Omit to serve none of these routes.
    */
   watches?: WatchStore;
+  /** Powers /v1/auth/* (passkey, email link, external wallet). Omit to serve none of these routes. */
+  auth?: AuthService;
 };
 
 type Env = { Variables: { account: Account } };
@@ -89,9 +92,27 @@ const RunBody = z.discriminatedUnion("route", [
 ]);
 const DisputeBody = z.object({ rowIdx: z.array(z.number().int().nonnegative()).min(1).max(25), evidence: z.string().max(4000).default("") });
 
-export async function accountFromRequest(service: JobService, authorization: string | undefined): Promise<Account | null> {
+/**
+ * A Bearer token is either an access key (the existing per-key account space) or, when `auth`
+ * is wired in, a live sign-in session id — tried in that order. A signed-in session resolves to
+ * the real `accounts.id` row directly: `Account.id` is just an opaque string key to `JobService`,
+ * so a session gives that identity's jobs/credits/referrals continuity across devices and keys.
+ */
+export async function accountFromRequest(service: JobService, authorization: string | undefined, auth?: AuthService): Promise<Account | null> {
   const m = /^Bearer\s+(\S+)$/i.exec(authorization ?? "");
-  return m ? service.accountForKey(m[1]!) : null;
+  if (!m) return null;
+  const token = m[1]!;
+  const viaKey = await service.accountForKey(token);
+  if (viaKey) return viaKey;
+  if (auth) {
+    try {
+      const session = await auth.currentSession(token);
+      return { id: session.accountId, tier: "paid" };
+    } catch {
+      /* not a live session either */
+    }
+  }
+  return null;
 }
 
 /** §9.2 REST /v1, x402, tRPC and the well-known documents. */
@@ -116,7 +137,7 @@ export function createApp(deps: AppDeps) {
   });
 
   const requireAccount = async (c: Context<Env>): Promise<Account> => {
-    const account = await accountFromRequest(service, c.req.header("authorization"));
+    const account = await accountFromRequest(service, c.req.header("authorization"), deps.auth);
     if (!account) throw new ServiceError("forbidden", COPY.unauthorized);
     return account;
   };
@@ -127,7 +148,7 @@ export function createApp(deps: AppDeps) {
 
   /** Without a key, the caller is given one so they can read back what they create. */
   app.post("/v1/quotes", async (c) => {
-    let account = await accountFromRequest(service, c.req.header("authorization"));
+    let account = await accountFromRequest(service, c.req.header("authorization"), deps.auth);
     let accessKey: string | undefined;
     if (!account) {
       accessKey = (await service.issueAnonymousKey()).secret;
@@ -163,7 +184,7 @@ export function createApp(deps: AppDeps) {
     // The browser's EventSource cannot set a custom header, so (like /v1/ws below) this also
     // accepts the access key as a query parameter.
     const authHeader = c.req.header("authorization") ?? (c.req.query("key") ? `Bearer ${c.req.query("key")}` : undefined);
-    const account = await accountFromRequest(service, authHeader);
+    const account = await accountFromRequest(service, authHeader, deps.auth);
     if (!account) throw new ServiceError("forbidden", COPY.unauthorized);
     const jobKey = key(c);
     await service.status(account, jobKey); // ownership check; throws not_found otherwise
@@ -202,6 +223,51 @@ export function createApp(deps: AppDeps) {
     return c.json((await service.dispute(account, key(c), b.rowIdx, b.evidence)) as object, 201);
   });
 
+  // ───────────────────────── shares (§11.4) ─────────────────────────
+
+  app.post("/v1/jobs/:key/shares", async (c) => {
+    const account = await requireAccount(c);
+    const b = await body(c, z.object({ visibility: z.enum(["private", "unlisted", "public"]) }));
+    return c.json(await service.createShare(account, key(c), b.visibility), 201);
+  });
+
+  app.get("/v1/shares/:slug", async (c) => {
+    const account = await accountFromRequest(service, c.req.header("authorization"), deps.auth);
+    return c.json(await service.getShare(c.req.param("slug"), account ?? undefined));
+  });
+
+  app.post("/v1/shares/:slug/visibility", async (c) => {
+    const account = await requireAccount(c);
+    const b = await body(c, z.object({ visibility: z.enum(["private", "unlisted", "public"]) }));
+    await service.setShareVisibility(account, c.req.param("slug"), b.visibility);
+    return c.json({ ok: true });
+  });
+
+  app.post("/v1/shares/:slug/rerun", async (c) => c.json(await service.rerunShare(await requireAccount(c), c.req.param("slug"))));
+
+  // ───────────────────────── referrals and credits (§11.4, §10.3) ─────────────────────────
+
+  app.get("/v1/account/referral-code", async (c) => c.json({ code: await service.referralCode(await requireAccount(c)) }));
+
+  /** Without a key, the caller is given one, same as /v1/quotes: a real first-time visitor following a referral link has no account yet either. */
+  app.post("/v1/account/referrals", async (c) => {
+    let account = await accountFromRequest(service, c.req.header("authorization"), deps.auth);
+    let accessKey: string | undefined;
+    if (!account) {
+      accessKey = (await service.issueAnonymousKey()).secret;
+      account = (await service.accountForKey(accessKey))!;
+    }
+    const b = await body(c, z.object({ refCode: z.string().min(1).max(20) }));
+    // No device/IP/funding-graph context exists on this request yet (day1.md #22): every
+    // signal but the caller's own claim defaults to "no match", so self-referral detection
+    // here is weaker than a real deployment's. See computeReferralSignals in @jelly/settlement
+    // for the real signals this would use once a device cookie and wallet are wired in.
+    const result = await service.registerReferral(account, b.refCode, { sameDevice: false, sameIpPrefix: false, fundingLinked: false });
+    return c.json({ ...result, ...(accessKey ? { accessKey, accessKeyNote: COPY.accessKeyNote } : {}) });
+  });
+
+  app.get("/v1/account/credits", async (c) => c.json({ balanceUsd: await service.creditBalance(await requireAccount(c)) }));
+
   /**
    * Dev-only stand-in for a real wallet signature (see `devFunding` above):
    * marks a prepared job funded directly. Only registered when `devFunding`
@@ -225,7 +291,7 @@ export function createApp(deps: AppDeps) {
     const watches = deps.watches;
     /** Without a key, the caller is given one, same as /v1/quotes: this may be someone's first request. */
     app.post("/v1/watches", async (c) => {
-      let account = await accountFromRequest(service, c.req.header("authorization"));
+      let account = await accountFromRequest(service, c.req.header("authorization"), deps.auth);
       let accessKey: string | undefined;
       if (!account) {
         accessKey = (await service.issueAnonymousKey()).secret;
@@ -243,6 +309,77 @@ export function createApp(deps: AppDeps) {
       const deleted = await watches.deleteWatch(account.id, c.req.param("id"));
       if (!deleted) throw new ServiceError("not_found", COPY.watchNotFound);
       return c.json({ ok: true });
+    });
+  }
+
+  // ───────────────────────── sign-in (§10.1) ─────────────────────────
+
+  if (deps.auth) {
+    const auth = deps.auth;
+    const authErr = (e: unknown): never => {
+      if (e instanceof AuthError) throw new ServiceError("invalid", e.message);
+      throw e;
+    };
+
+    app.post("/v1/auth/passkey/register/begin", (c) => c.json(auth.beginPasskeyRegistration()));
+    app.post("/v1/auth/passkey/register/complete", async (c) => {
+      const b = await body(c, z.object({ challenge: z.string().min(1), response: z.unknown() }));
+      try {
+        const { accountId, session } = await auth.completeRegistration(b.response, b.challenge);
+        return c.json({ accountId, sessionId: session.id }, 201);
+      } catch (e) {
+        authErr(e);
+      }
+    });
+
+    app.post("/v1/auth/passkey/login/begin", (c) => c.json(auth.beginPasskeyAuthentication()));
+    app.post("/v1/auth/passkey/login/complete", async (c) => {
+      const b = await body(c, z.object({ challenge: z.string().min(1), credentialId: z.string().min(1), response: z.unknown() }));
+      try {
+        const { accountId, session, possibleClone } = await auth.completeAuthentication(b.credentialId, b.response, b.challenge);
+        return c.json({ accountId, sessionId: session.id, possibleClone });
+      } catch (e) {
+        authErr(e);
+      }
+    });
+
+    /** A plain sign-this-message challenge (§10.1 (4)), not full SIWE/EIP-4361. */
+    app.post("/v1/auth/siwe/challenge", async (c) => {
+      const b = await body(c, z.object({ address: z.string().refine((s): s is Address => isAddress(s)), chain: z.string().min(1).default("eip155:8453") }));
+      return c.json(auth.issueSiweChallenge(b.address, b.chain));
+    });
+    app.post("/v1/auth/siwe/verify", async (c) => {
+      const b = await body(
+        c,
+        z.object({
+          address: z.string().refine((s): s is Address => isAddress(s)),
+          message: z.string().min(1),
+          signature: z.string().refine((s): s is Hex => isHex(s)),
+          nonce: z.string().min(1),
+        }),
+      );
+      try {
+        const { accountId, session } = await auth.verifySiwe(b.address, b.message, b.signature, b.nonce);
+        return c.json({ accountId, sessionId: session.id });
+      } catch (e) {
+        authErr(e);
+      }
+    });
+
+    /** Dev-only: no mailer is wired in, so the link token is returned directly instead of emailed (mirrors POST /v1/jobs/:key/dev-fund). */
+    app.post("/v1/auth/email/request", async (c) => {
+      const b = await body(c, z.object({ email: z.string().email() }));
+      const { token } = auth.requestEmailLink(b.email);
+      return c.json({ devToken: token, devNote: COPY.emailDevNote });
+    });
+    app.post("/v1/auth/email/verify", async (c) => {
+      const b = await body(c, z.object({ token: z.string().min(1) }));
+      try {
+        const { accountId, session } = await auth.verifyEmailLink(b.token);
+        return c.json({ accountId, sessionId: session.id });
+      } catch (e) {
+        authErr(e);
+      }
     });
   }
 
@@ -430,7 +567,7 @@ export function createApp(deps: AppDeps) {
       router: appRouter,
       createContext: async (_opts, c) => ({
         service,
-        account: await accountFromRequest(service, c.req.header("authorization")),
+        account: await accountFromRequest(service, c.req.header("authorization"), deps.auth),
       }),
     }),
   );

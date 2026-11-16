@@ -14,6 +14,7 @@ export const COPY = {
   replayed: "This payment authorization was already used. Sign a new one.",
   watchNotFound: "No watch with that id for this account.",
   noPayer: "This job has no payer address to fund from.",
+  emailDevNote: "No mailer is configured: this dev build returns the link token directly instead of emailing it.",
   agentName: "JellySwarm Fanout",
   agentDescription:
     "Give it a list and a question. Up to 247 open-model agents work through the list in parallel, an independent checker re-checks every row against its sources, and you pay only for rows that pass. The price is fixed before the job runs.",

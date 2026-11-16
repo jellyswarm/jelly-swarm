@@ -44,6 +44,9 @@ importers:
       '@jelly/gateway':
         specifier: workspace:*
         version: link:../../packages/gateway
+      '@jelly/keeper':
+        specifier: workspace:*
+        version: link:../keeper
       '@jelly/live':
         specifier: workspace:*
         version: link:../../packages/live

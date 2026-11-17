@@ -43,6 +43,8 @@ export interface Escrow {
   /** The stablecoin jobs are paid in, with its EIP-712 domain for x402. */
   readonly asset: { address: Address; symbol: string; name: string; version: string };
   verdictDomain(): VerdictDomainParams;
+  /** EIP-712 domain for a `SpendGrant` (the BalanceVault contract's own `name`/`version`). */
+  grantDomain(): { chainId: number; verifyingContract: Address };
 
   openJob(args: OpenJobArgs): Promise<{ jobId: bigint; jobKey: Hex }>;
   status(jobId: bigint): Promise<EscrowStatus>;
@@ -95,6 +97,7 @@ export class MemoryEscrow implements Escrow {
   };
   private readonly escrowAddress = "0x00000000000000000000000000000000000000e5" as Address;
   private readonly splitAddress = "0x00000000000000000000000000000000000000f5" as Address;
+  private readonly vaultAddress = "0x00000000000000000000000000000000000000fa" as Address;
   private readonly jobs = new Map<bigint, { args: OpenJobArgs; status: EscrowStatus; client?: Address }>();
   private readonly balances = new Map<string, bigint>();
   readonly vault = new Map<string, bigint>();
@@ -132,6 +135,10 @@ export class MemoryEscrow implements Escrow {
       encodeAbiParameters([{ type: "string" }, { type: "uint256" }, { type: "address" }], [kind, id, who]),
     );
     return getAddress(`0x${h.slice(-40)}`);
+  }
+
+  grantDomain(): { chainId: number; verifyingContract: Address } {
+    return { chainId: 8453, verifyingContract: this.vaultAddress };
   }
 
   verdictDomain(): VerdictDomainParams {

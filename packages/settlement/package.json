@@ -11,6 +11,7 @@
     "@jelly/receipts": "workspace:*",
     "@jelly/service": "workspace:*",
     "@jelly/shared": "workspace:*",
+    "ioredis": "^6.0.0",
     "viem": "^2.57.20"
   },
   "devDependencies": {

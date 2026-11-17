@@ -1,4 +1,5 @@
 import { buildApp } from "./bootstrap";
+import { logger } from "./logger";
 
 /**
  * Production entrypoint (day1.md #23). `bun run src/server.ts`, or
@@ -10,5 +11,5 @@ if (import.meta.main) {
   const { app, websocket } = await buildApp();
   const port = Number(process.env.PORT ?? 3000);
   const server = Bun.serve({ port, fetch: app.fetch, websocket });
-  console.log(`api listening on :${server.port}`);
+  logger.info({ port: server.port }, "api listening");
 }

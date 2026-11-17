@@ -103,6 +103,10 @@ export class ViemEscrow implements Escrow {
     return { chainId: this.deps.chainId, verifyingContract: this.deps.addresses.rowSplit };
   }
 
+  grantDomain(): { chainId: number; verifyingContract: Address } {
+    return { chainId: this.deps.chainId, verifyingContract: this.deps.addresses.balanceVault };
+  }
+
   async openJob(args: OpenJobArgs): Promise<{ jobId: bigint; jobKey: Hex }> {
     const { request } = await this.deps.publicClient.simulateContract({
       address: this.deps.addresses.rowSplit,

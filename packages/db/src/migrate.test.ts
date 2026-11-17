@@ -52,7 +52,14 @@ describe.skipIf(!reachable)("migrations against Postgres", () => {
   });
 
   test("the database refuses a quote above 247 agents", async () => {
-    await expect(db.insert(schema.quotes).values(quote(248))).rejects.toThrow();
+    // Not `expect(db.insert(...)).rejects.toThrow()`: Bun's `rejects` matcher doesn't await a
+    // drizzle query builder's own thenable correctly, so it never actually ran the query. Wrapping
+    // it in a real `async` IIFE gives `expect` a native Promise instead.
+    await expect(
+      (async () => {
+        await db.insert(schema.quotes).values(quote(248));
+      })(),
+    ).rejects.toThrow();
   });
 
   test("money round-trips as bigint", async () => {

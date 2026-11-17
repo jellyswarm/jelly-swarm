@@ -135,6 +135,101 @@ describe("fund and run", () => {
     expect(s.escrow.vault.get(WALLET.toLowerCase())).toBe(5_000_000n - 280_000n);
   });
 
+  describe("free tier", () => {
+    const STUDIO = "0x000000000000000000000000000000000000Fee" as Address;
+    const studioGrant: SignedGrant = {
+      owner: STUDIO,
+      keyId: `0x${"22".repeat(32)}` as Hex,
+      perJobCapUsd6: 550_000n,
+      perDayCapUsd6: 50_000_000n,
+      expiresAt: 2_000_000_000n,
+      periodCapUsd6: 0n,
+      minCoverageBps: 0,
+      signature: "0x00",
+    };
+
+    test("pays from the studio's own vault, never the caller's", async () => {
+      const s = makeService({ studioGrant });
+      s.escrow.vault.set(STUDIO.toLowerCase(), 5_000_000n);
+      const quote = await s.service.quote(ALICE, input(["tok-0", "tok-1"])); // $0.28, within the cap
+      const job = await s.service.runFree(ALICE, quote.quoteId);
+      expect(job.state).toBe("running");
+      await s.service.finished(job.jobKey);
+      expect((await s.service.get(ALICE, job.jobKey)).state).toBe("settled");
+      expect(s.escrow.vault.get(STUDIO.toLowerCase())).toBe(5_000_000n - 280_000n);
+    });
+
+    test("is refused when no studio grant is configured", async () => {
+      const s = makeService(); // no studioGrant
+      const quote = await s.service.quote(ALICE, input(["tok-0", "tok-1"]));
+      expect(await code(s.service.runFree(ALICE, quote.quoteId))).toBe("not_ready");
+    });
+
+    test("is refused when the quote prices above the free-tier cap", async () => {
+      const s = makeService({ studioGrant });
+      s.escrow.vault.set(STUDIO.toLowerCase(), 5_000_000n);
+      const quote = await s.service.quote(ALICE, input(Array.from({ length: 25 }, (_, i) => `tok-${i}`))); // $0.25 + 25×$0.015 = $0.625
+      expect(await code(s.service.runFree(ALICE, quote.quoteId))).toBe("invalid");
+    });
+  });
+
+  describe("paying with a credit balance", () => {
+    const STUDIO = "0x000000000000000000000000000000000000Fee" as Address;
+    const creditsGrant: SignedGrant = {
+      owner: STUDIO,
+      keyId: `0x${"33".repeat(32)}` as Hex,
+      perJobCapUsd6: 50_000_000n,
+      perDayCapUsd6: 500_000_000n,
+      expiresAt: 2_000_000_000n,
+      periodCapUsd6: 0n,
+      minCoverageBps: 0,
+      signature: "0x00",
+    };
+
+    test("pays from the studio's vault and debits the caller's own credit balance, never the studio's budget", async () => {
+      const s = makeService({ creditsGrant });
+      s.escrow.vault.set(STUDIO.toLowerCase(), 5_000_000n);
+      await s.store.addCredit({ id: "c1", accountId: ALICE.id, deltaUsd6: 1_000_000n, reason: "referral_referrer", createdAtMs: s.clock.now });
+      expect(await s.service.creditBalance(ALICE)).toBe("1.00");
+
+      const quote = await s.service.quote(ALICE, input(["tok-0", "tok-1"])); // $0.28
+      const job = await s.service.runFromCredits(ALICE, quote.quoteId);
+      expect(job.state).toBe("running");
+      await s.service.finished(job.jobKey);
+      expect((await s.service.get(ALICE, job.jobKey)).state).toBe("settled");
+      expect(s.escrow.vault.get(STUDIO.toLowerCase())).toBe(5_000_000n - 280_000n);
+      expect(await s.service.creditBalance(ALICE)).toBe("0.72"); // $1.00 - $0.28
+    });
+
+    test("a row that fails checking is never charged for: the debit is the settled amount, not the quoted price", async () => {
+      const s = makeService({ creditsGrant });
+      s.escrow.vault.set(STUDIO.toLowerCase(), 5_000_000n);
+      await s.store.addCredit({ id: "c1", accountId: ALICE.id, deltaUsd6: 1_000_000n, reason: "referral_referrer", createdAtMs: s.clock.now });
+
+      const quote = await s.service.quote(ALICE, input(["tok-0", "bad-1"])); // $0.28 quoted; only tok-0 will pass
+      const job = await s.service.runFromCredits(ALICE, quote.quoteId);
+      await s.service.finished(job.jobKey);
+      expect((await s.service.get(ALICE, job.jobKey)).state).toBe("settled");
+      // 1 passed row: $0.25 base + $0.015 = $0.265 — not the full $0.28 quoted.
+      expect(await s.service.creditBalance(ALICE)).toBe("0.735"); // $1.00 - $0.265
+    });
+
+    test("is refused when no credits grant is configured", async () => {
+      const s = makeService(); // no creditsGrant
+      await s.store.addCredit({ id: "c1", accountId: ALICE.id, deltaUsd6: 1_000_000n, reason: "referral_referrer", createdAtMs: s.clock.now });
+      const quote = await s.service.quote(ALICE, input(["tok-0", "tok-1"]));
+      expect(await code(s.service.runFromCredits(ALICE, quote.quoteId))).toBe("not_ready");
+    });
+
+    test("is refused when the balance does not cover the job's price", async () => {
+      const s = makeService({ creditsGrant });
+      s.escrow.vault.set(STUDIO.toLowerCase(), 5_000_000n);
+      await s.store.addCredit({ id: "c1", accountId: ALICE.id, deltaUsd6: 100_000n, reason: "referral_referrer", createdAtMs: s.clock.now }); // $0.10
+      const quote = await s.service.quote(ALICE, input(["tok-0", "tok-1"])); // $0.28
+      expect(await code(s.service.runFromCredits(ALICE, quote.quoteId))).toBe("payment_required");
+    });
+  });
+
   test("if settlement fails, the job is marked failed with a safe message and no internal detail", async () => {
     const s = makeService();
     s.escrow.settle = async () => {

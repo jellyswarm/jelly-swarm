@@ -15,6 +15,10 @@ export const COPY = {
   watchNotFound: "No watch with that id for this account.",
   noPayer: "This job has no payer address to fund from.",
   emailDevNote: "No mailer is configured: this dev build returns the link token directly instead of emailing it.",
+  freeTierNotConfigured: "The free tier is not available right now.",
+  freeTierBanned: "This device or account can no longer start free jobs.",
+  powInvalid: "That proof-of-work answer is missing, wrong, or has expired. Ask for a new challenge.",
+  freeTierRateLimited: "You've used up your free jobs for now. Try again later, or pay for this one.",
   agentName: "JellySwarm Fanout",
   agentDescription:
     "Give it a list and a question. Up to 247 open-model agents work through the list in parallel, an independent checker re-checks every row against its sources, and you pay only for rows that pass. The price is fixed before the job runs.",

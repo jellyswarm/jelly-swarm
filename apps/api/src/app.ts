@@ -1,11 +1,13 @@
 import { trpcServer } from "@hono/trpc-server";
+import { type BanStore, type ProofOfWork, type WindowCounter, checkAndConsume, checkFreeTierPolicy, onJobRejected } from "@jelly/abuse";
 import { AuthError, type AuthService } from "@jelly/auth";
 import type { WatchStore } from "@jelly/db";
 import type { EventBus } from "@jelly/live";
 import { type Account, type Escrow, type JobService, type JobStore, QuoteInput, ServiceError, type SignedGrant } from "@jelly/service";
-import { type BurnRecord, buildStats } from "@jelly/settlement";
-import { usd6 } from "@jelly/shared";
-import { createBunWebSocket } from "hono/bun";
+import { type BurnRecord, type IpHistory, buildStats } from "@jelly/settlement";
+import { FREE_TIER, ipPrefixOf, usd6 } from "@jelly/shared";
+import { createBunWebSocket, getConnInfo } from "hono/bun";
+import { getCookie, setCookie } from "hono/cookie";
 import { cors } from "hono/cors";
 import {
   type Facilitator,
@@ -21,6 +23,7 @@ import { type Context, Hono } from "hono";
 import { type Address, type Hex, isAddress, isHex } from "viem";
 import { z } from "zod";
 import { COPY } from "./copy";
+import type { Mailer } from "./mailer";
 import { appRouter } from "./trpc";
 
 export type AppDeps = {
@@ -60,6 +63,19 @@ export type AppDeps = {
   watches?: WatchStore;
   /** Powers /v1/auth/* (passkey, email link, external wallet). Omit to serve none of these routes. */
   auth?: AuthService;
+  /** Sends the real email sign-in link. Omit to dev-bypass: the link token comes back in the response instead of being emailed. */
+  mailer?: Mailer;
+  /** Base URL of the dashboard, used to build the link a sign-in email points at. */
+  webUrl?: string;
+  /** Powers the self-referral "shared IP prefix within 24h" signal. Omit to leave it always "no match". */
+  ipHistory?: IpHistory;
+  /**
+   * §10.3 free tier: a PoW challenge, device/IP rate buckets, and ban escalation, all sitting in
+   * front of `JobService.runFree`. Needs `auth` too, for the device cookie. Omit to serve neither
+   * `POST /v1/pow/challenge` nor the `"free"` route on `POST /v1/jobs`. ASN rate-limiting is not
+   * implemented — there is no ASN lookup wired in — so `perAsnPerDay` is never enforced.
+   */
+  freeTier?: { bans: BanStore; pow: ProofOfWork; rateLimits: WindowCounter };
 };
 
 type Env = { Variables: { account: Account } };
@@ -89,6 +105,8 @@ const Grant = z.object({
 const RunBody = z.discriminatedUnion("route", [
   z.object({ quoteId: z.string().uuid(), route: z.literal("wallet"), payer: z.string() }),
   z.object({ quoteId: z.string().uuid(), route: z.literal("vault"), grant: Grant.optional() }),
+  z.object({ quoteId: z.string().uuid(), route: z.literal("free"), pow: z.object({ challenge: z.string().min(1), nonce: z.string().min(1) }) }),
+  z.object({ quoteId: z.string().uuid(), route: z.literal("credits") }),
 ]);
 const DisputeBody = z.object({ rowIdx: z.array(z.number().int().nonnegative()).min(1).max(25), evidence: z.string().max(4000).default("") });
 
@@ -144,6 +162,28 @@ export function createApp(deps: AppDeps) {
   const body = async <T>(c: Context<Env>, schema: z.ZodType<T>): Promise<T> => schema.parse(await c.req.json());
   const key = (c: Context<Env>): Hex => JobKey.parse(c.req.param("key"));
 
+  /**
+   * A long-lived device cookie, issued lazily, for the self-referral `sameDevice` signal
+   * (§11.4). Independent of sign-in: it only ever gets linked to an account id that is a real
+   * `accounts` row (UUID), since `devices.accountId` is a Postgres `uuid` column and the
+   * access-key system's synthetic ids ("anon:…", "key:…") are not valid UUIDs.
+   */
+  const DEVICE_COOKIE = "jelly_device";
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const deviceIdFor = (c: Context<Env>): string | undefined => {
+    if (!deps.auth) return undefined;
+    const { deviceId, cookie, isNew } = deps.auth.startAnonymous(getCookie(c, DEVICE_COOKIE));
+    if (isNew) setCookie(c, DEVICE_COOKIE, cookie, { httpOnly: true, sameSite: "Lax", path: "/", maxAge: 365 * 24 * 3600 });
+    return deviceId;
+  };
+
+  /** The caller's own address, preferring a reverse proxy's X-Forwarded-For over the raw socket. */
+  const clientIpFor = (c: Context<Env>): string | undefined => {
+    const forwarded = c.req.header("x-forwarded-for");
+    if (forwarded) return forwarded.split(",")[0]!.trim();
+    return getConnInfo(c).remote.address;
+  };
+
   // ───────────────────────── quotes and jobs ─────────────────────────
 
   /** Without a key, the caller is given one so they can read back what they create. */
@@ -162,8 +202,43 @@ export function createApp(deps: AppDeps) {
     const account = await requireAccount(c);
     const b = await body(c, RunBody);
     if (b.route === "vault") return c.json({ job: await service.runFromVault(account, b.quoteId, b.grant) });
+    if (b.route === "free") {
+      if (!deps.freeTier) throw new ServiceError("not_ready", COPY.freeTierNotConfigured);
+      const deviceId = deviceIdFor(c);
+      if (!deviceId) throw new ServiceError("forbidden", COPY.unauthorized);
+      const { bans, pow, rateLimits } = deps.freeTier;
+      if ((await bans.isBanned("device", deviceId)) || (await bans.isBanned("account", account.id))) {
+        throw new ServiceError("forbidden", COPY.freeTierBanned);
+      }
+      if (!(await pow.verify(b.pow.challenge, b.pow.nonce, deviceId, Date.now()))) {
+        throw new ServiceError("invalid", COPY.powInvalid);
+      }
+      const ip = clientIpFor(c);
+      const refusal = await checkAndConsume(rateLimits, FREE_TIER, { deviceId, ipPrefix: ip ? ipPrefixOf(ip) : "unknown" }, Date.now());
+      if (refusal) throw new ServiceError("forbidden", COPY.freeTierRateLimited);
+      const quote = await deps.store.getQuote(b.quoteId);
+      const policy = quote ? checkFreeTierPolicy(quote.spec.task, quote.spec.items.map((i) => i.raw)) : null;
+      if (policy) {
+        await onJobRejected(bans, "device", deviceId);
+        throw new ServiceError("forbidden", policy.message);
+      }
+      return c.json({ job: await service.runFree(account, b.quoteId) });
+    }
+    if (b.route === "credits") return c.json({ job: await service.runFromCredits(account, b.quoteId) });
     return c.json(await service.prepare(account, b.quoteId, "wallet", b.payer));
   });
+
+  if (deps.freeTier) {
+    const { bans, pow } = deps.freeTier;
+    /** A caller asks for this before `POST /v1/jobs` with `route: "free"`; the proof binds to their device cookie. */
+    app.post("/v1/pow/challenge", async (c) => {
+      const deviceId = deviceIdFor(c);
+      if (!deviceId) throw new ServiceError("forbidden", COPY.unauthorized);
+      const penaltyBits = await bans.penaltyBits("device", deviceId);
+      const challenge = await pow.issue({ deviceId, penaltyBits, now: Date.now() });
+      return c.json({ challenge: challenge.challenge, difficultyBits: challenge.difficultyBits, expiresAtMs: challenge.expiresAtMs });
+    });
+  }
 
   app.post("/v1/jobs/:key/confirm", async (c) => c.json({ job: await service.confirm(await requireAccount(c), key(c)) }));
 
@@ -247,7 +322,14 @@ export function createApp(deps: AppDeps) {
 
   // ───────────────────────── referrals and credits (§11.4, §10.3) ─────────────────────────
 
-  app.get("/v1/account/referral-code", async (c) => c.json({ code: await service.referralCode(await requireAccount(c)) }));
+  app.get("/v1/account/referral-code", async (c) => {
+    const account = await requireAccount(c);
+    const deviceId = deviceIdFor(c);
+    if (deviceId && deps.auth && UUID_RE.test(account.id)) await deps.auth.noteDevice(deviceId, account.id);
+    const ip = clientIpFor(c);
+    if (deps.ipHistory && ip) await deps.ipHistory.note(account.id, ipPrefixOf(ip), Date.now());
+    return c.json({ code: await service.referralCode(account) });
+  });
 
   /** Without a key, the caller is given one, same as /v1/quotes: a real first-time visitor following a referral link has no account yet either. */
   app.post("/v1/account/referrals", async (c) => {
@@ -258,11 +340,27 @@ export function createApp(deps: AppDeps) {
       account = (await service.accountForKey(accessKey))!;
     }
     const b = await body(c, z.object({ refCode: z.string().min(1).max(20) }));
-    // No device/IP/funding-graph context exists on this request yet (day1.md #22): every
-    // signal but the caller's own claim defaults to "no match", so self-referral detection
-    // here is weaker than a real deployment's. See computeReferralSignals in @jelly/settlement
-    // for the real signals this would use once a device cookie and wallet are wired in.
-    const result = await service.registerReferral(account, b.refCode, { sameDevice: false, sameIpPrefix: false, fundingLinked: false });
+    // The funding-graph signal still defaults to "no match": a real one needs a chain indexer
+    // (see computeReferralSignals in @jelly/settlement), which doesn't exist yet. sameDevice is
+    // real whenever both sides are signed-in identity accounts (UUIDs) — the access-key system
+    // has no device cookie to compare, so it stays "no match" for anonymous callers. sameIpPrefix
+    // works for every caller, signed in or not: it's keyed on the account id as a plain string.
+    const deviceId = deviceIdFor(c);
+    let sameDevice = false;
+    if (deviceId && deps.auth && UUID_RE.test(account.id)) {
+      const referrerAccountId = await service.accountForReferralCode(b.refCode);
+      if (referrerAccountId) sameDevice = await deps.auth.deviceBelongsToAccount(deviceId, referrerAccountId);
+      await deps.auth.noteDevice(deviceId, account.id);
+    }
+    let sameIpPrefix = false;
+    const ip = clientIpFor(c);
+    if (deps.ipHistory && ip) {
+      const prefix = ipPrefixOf(ip);
+      const referrerAccountId = await service.accountForReferralCode(b.refCode);
+      if (referrerAccountId) sameIpPrefix = await deps.ipHistory.seenPrefix(referrerAccountId, prefix, Date.now());
+      await deps.ipHistory.note(account.id, prefix, Date.now());
+    }
+    const result = await service.registerReferral(account, b.refCode, { sameDevice, sameIpPrefix, fundingLinked: false });
     return c.json({ ...result, ...(accessKey ? { accessKey, accessKeyNote: COPY.accessKeyNote } : {}) });
   });
 
@@ -281,6 +379,19 @@ export function createApp(deps: AppDeps) {
       const job = await deps.store.getJob(jobKey);
       if (!job?.payer) throw new ServiceError("invalid", COPY.noPayer);
       (escrow as unknown as { markFunded: (jobId: bigint, client: Address) => void }).markFunded(job.jobId, job.payer as Address);
+      return c.json({ ok: true });
+    });
+
+    /**
+     * Dev-only stand-in for the real 24h dispute window: calls the same finalize hook the
+     * settlement-keeper calls once that window actually closes, so the referrer-credit payout
+     * path can be tested without waiting a real day. Same gating as dev-fund above.
+     */
+    app.post("/v1/jobs/:key/dev-finalize", async (c) => {
+      const account = await requireAccount(c);
+      const jobKey = key(c);
+      await service.status(account, jobKey); // ownership check; throws not_found otherwise
+      await service.onJobFinalized(jobKey);
       return c.json({ ok: true });
     });
   }
@@ -366,10 +477,15 @@ export function createApp(deps: AppDeps) {
       }
     });
 
-    /** Dev-only: no mailer is wired in, so the link token is returned directly instead of emailed (mirrors POST /v1/jobs/:key/dev-fund). */
+    /** Emails the link when a mailer is wired in; otherwise dev-bypasses it, returning the token directly (mirrors POST /v1/jobs/:key/dev-fund). */
     app.post("/v1/auth/email/request", async (c) => {
       const b = await body(c, z.object({ email: z.string().email() }));
       const { token } = auth.requestEmailLink(b.email);
+      if (deps.mailer) {
+        const link = `${deps.webUrl ?? "http://localhost:4173"}/dashboard?emailToken=${encodeURIComponent(token)}#account`;
+        await deps.mailer.sendEmailLink(b.email, link);
+        return c.json({ sent: true });
+      }
       return c.json({ devToken: token, devNote: COPY.emailDevNote });
     });
     app.post("/v1/auth/email/verify", async (c) => {

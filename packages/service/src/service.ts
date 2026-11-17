@@ -19,7 +19,18 @@ import { type EventBus, TileCoalescer } from "@jelly/live";
 import { type Merger, toCsv, toJson, toMarkdown } from "@jelly/merger";
 import { type ReceiptChain, merkleProof } from "@jelly/receipts";
 import type { TemplateRegistry } from "@jelly/templates";
-import { ChainKey, CREDITS, DISPUTE_FEE_BPS, DISPUTE_MAX_ROWS, DISPUTE_MIN_FEE_USD6, MAX_AGENTS, Product, Tier, formatUsd6 } from "@jelly/shared";
+import {
+  ChainKey,
+  CREDITS,
+  DISPUTE_FEE_BPS,
+  DISPUTE_MAX_ROWS,
+  DISPUTE_MIN_FEE_USD6,
+  FREE_TIER,
+  MAX_AGENTS,
+  Product,
+  Tier,
+  formatUsd6,
+} from "@jelly/shared";
 import { type Address, type Hex, isAddress } from "viem";
 import { z } from "zod";
 import { COPY } from "./copy";
@@ -110,6 +121,15 @@ export type ServiceDeps = {
   workerOperatorId?: bigint;
   spentMicros?: (jobKey: Hex) => Promise<bigint>;
   now?: () => number;
+  /** §10.3 free-tier jobs: a grant the studio signed for its own vault balance, capped per FREE_TIER. Omit to refuse every free-tier run. */
+  studioGrant?: SignedGrant;
+  /**
+   * §11.4 paying with a credit balance: a second studio grant, separate from `studioGrant` so a
+   * free-tier job and a credits-funded job never share one daily spend cap. The studio still
+   * funds the real job from its own vault; this debits the caller's credit ledger by the same
+   * amount instead of it costing them nothing. Omit to refuse every credits-funded run.
+   */
+  creditsGrant?: SignedGrant;
 };
 
 const jsonSafe = (v: unknown): unknown => JSON.parse(JSON.stringify(v, (_k, x) => (typeof x === "bigint" ? x.toString() : x)));
@@ -246,12 +266,13 @@ export class JobService {
   async prepare(
     account: Account,
     quoteId: string,
-    route: "x402" | "wallet" | "vault",
+    route: "x402" | "wallet" | "vault" | "free" | "credits",
     payer?: string,
   ): Promise<{ job: JobView; payment?: PaymentInstructions }> {
     const quote = await this.deps.store.getQuote(quoteId);
     if (!quote || quote.accountId !== account.id) throw new ServiceError("not_found", COPY.notFound);
-    if (route !== "vault" && (!payer || !isAddress(payer))) throw new ServiceError("invalid", COPY.payerRequired);
+    const noPayerNeeded = route === "vault" || route === "free" || route === "credits";
+    if (!noPayerNeeded && (!payer || !isAddress(payer))) throw new ServiceError("invalid", COPY.payerRequired);
 
     let job = await this.deps.store.getJobByQuote(quoteId);
     if (!job) {
@@ -297,7 +318,7 @@ export class JobService {
     }
 
     if (job.state !== "awaiting_payment") return { job: this.jobView(job) };
-    return { job: this.jobView(job), ...(route === "vault" ? {} : { payment: await this.paymentFor(job) }) };
+    return { job: this.jobView(job), ...(noPayerNeeded ? {} : { payment: await this.paymentFor(job) }) };
   }
 
   private async paymentFor(job: StoredJob): Promise<PaymentInstructions> {
@@ -327,6 +348,50 @@ export class JobService {
     const stored = await this.owned(account, job.jobKey);
     if (stored.state !== "awaiting_payment") return this.jobView(stored);
     await this.deps.escrow.fundFromVault(stored.jobId, grant, stored.lines.totalUsd6);
+    return this.jobView(await this.start(stored));
+  }
+
+  /**
+   * §10.3 "first job free": pays from the studio's own vault balance under a grant it signed for
+   * itself, never the caller's money. Capped at `FREE_TIER.maxQuoteUsd6` regardless of what the
+   * quote otherwise prices at — anything above that must use a real funding route. The caller
+   * (the HTTP layer) is responsible for the device/IP/ASN rate limits and PoW challenge this is
+   * meant to sit behind; this method only enforces the price cap and does the funding + run.
+   */
+  async runFree(account: Account, quoteId: string): Promise<JobView> {
+    if (!this.deps.studioGrant) throw new ServiceError("not_ready", COPY.freeTierNotConfigured);
+    const quote = await this.deps.store.getQuote(quoteId);
+    if (!quote || quote.accountId !== account.id) throw new ServiceError("not_found", COPY.notFound);
+    if (quote.lines.totalUsd6 > FREE_TIER.maxQuoteUsd6) throw new ServiceError("invalid", COPY.overFreeTierCap);
+
+    const { job } = await this.prepare(account, quoteId, "free");
+    const stored = await this.owned(account, job.jobKey);
+    if (stored.state !== "awaiting_payment") return this.jobView(stored);
+    await this.deps.escrow.fundFromVault(stored.jobId, this.deps.studioGrant, stored.lines.totalUsd6);
+    return this.jobView(await this.start(stored));
+  }
+
+  /**
+   * §11.4 paying with a credit balance (e.g. a referral payout): the studio still funds the real
+   * job from its own vault — the caller's money never moves — but this debits their credit
+   * ledger by the job's price, so unlike `runFree` it is bounded by what they actually have, not
+   * a fixed cap.
+   */
+  async runFromCredits(account: Account, quoteId: string): Promise<JobView> {
+    if (!this.deps.creditsGrant) throw new ServiceError("not_ready", COPY.creditsNotConfigured);
+    const quote = await this.deps.store.getQuote(quoteId);
+    if (!quote || quote.accountId !== account.id) throw new ServiceError("not_found", COPY.notFound);
+    const balance = await this.deps.store.creditBalance(account.id, this.now());
+    if (balance < quote.lines.totalUsd6) throw new ServiceError("payment_required", COPY.insufficientCredit);
+
+    const { job } = await this.prepare(account, quoteId, "credits");
+    const stored = await this.owned(account, job.jobKey);
+    if (stored.state !== "awaiting_payment") return this.jobView(stored);
+    await this.deps.escrow.fundFromVault(stored.jobId, this.deps.creditsGrant, stored.lines.totalUsd6);
+    // Debited once the job actually settles (see `execute`), for whatever it actually comes to —
+    // not the full quoted price up front. A refund for failed rows returns to the studio's own
+    // vault either way (it funded the job), so charging the full price here would double-dip:
+    // the caller's credit gone *and* no corresponding value received for the refunded rows.
     return this.jobView(await this.start(stored));
   }
 
@@ -428,6 +493,18 @@ export class JobService {
         tx: settled.tx,
       });
       await this.emitCost(job.jobKey, job.lines.totalUsd6);
+
+      const charged = amounts.grossUsd6 + amounts.toolsBilledUsd6;
+      if (job.route === "credits" && charged > 0n) {
+        await store.addCredit({
+          id: randomUUID(),
+          accountId: job.accountId,
+          deltaUsd6: -charged,
+          reason: "spend",
+          jobKey: job.jobKey,
+          createdAtMs: this.now(),
+        });
+      }
     } catch {
       // The detail stays in our logs. On-chain the job is still funded, so the
       // payer gets everything back through the expiry refund.
@@ -749,6 +826,11 @@ export class JobService {
     const code = randomBytes(5).toString("base64url").slice(0, 7);
     await this.deps.store.putReferralCode(account.id, code);
     return code;
+  }
+
+  /** The referrer's account id for a code, or undefined if it names no one — lets a caller compute self-referral signals before calling registerReferral. */
+  accountForReferralCode(refCode: string): Promise<string | undefined> {
+    return this.deps.store.getAccountForReferralCode(refCode);
   }
 
   /**

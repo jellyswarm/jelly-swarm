@@ -84,6 +84,18 @@ export class AuthService {
     return account.id;
   }
 
+  /** Records that this device belongs to an already-resolved account, e.g. so a later signup from the same device can be recognized as self-referral (§11.4). Overwrites any prior link: a device cookie tracks one browser, so the latest account to use it wins. */
+  async noteDevice(deviceId: string, accountId: string): Promise<void> {
+    const existing = await this.deps.accounts.getDevice(deviceId);
+    await this.deps.accounts.putDevice({ id: deviceId, accountId, powPenaltyBits: existing?.powPenaltyBits ?? 0 });
+  }
+
+  /** True if this device cookie is already on file as belonging to `accountId`. */
+  async deviceBelongsToAccount(deviceId: string, accountId: string): Promise<boolean> {
+    const device = await this.deps.accounts.getDevice(deviceId);
+    return device?.accountId === accountId;
+  }
+
   // ───────────────────────── (2) passkey ─────────────────────────
 
   beginPasskeyRegistration(): { challenge: string } {

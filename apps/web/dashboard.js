@@ -345,10 +345,14 @@ function render(id) {
       const devLink = drawer.querySelector('#email-dev-link');
       if (!email) { signin.textContent = 'Enter an email address.'; return; }
       try {
-        const { devToken, devNote } = await JellyApi.requestEmailLink(email);
-        devLink.innerHTML = `<p>${escapeHtml(devNote)}</p><button class="button outline" type="button" id="email-use-link">Use this link</button>`;
+        const result = await JellyApi.requestEmailLink(email);
+        if (result.sent) {
+          devLink.innerHTML = `<p>Check ${escapeHtml(email)} for a sign-in link.</p>`;
+          return;
+        }
+        devLink.innerHTML = `<p>${escapeHtml(result.devNote)}</p><button class="button outline" type="button" id="email-use-link">Use this link</button>`;
         devLink.querySelector('#email-use-link').addEventListener('click', async () => {
-          try { signedIn(await JellyApi.verifyEmailLink(devToken)); } catch (e) { signin.textContent = e.message || errorMessage(e); }
+          try { signedIn(await JellyApi.verifyEmailLink(result.devToken)); } catch (e) { signin.textContent = e.message || errorMessage(e); }
         });
       } catch (e) {
         signin.textContent = errorMessage(e);
@@ -411,5 +415,15 @@ document.querySelector('#tint-scene').addEventListener('click', (e) => { const v
 const video = document.querySelector('#dash-video'); const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 if (reduced) { video.pause(); video.removeAttribute('autoplay'); }
 document.addEventListener('visibilitychange', () => { if (document.hidden) video.pause(); else if (!reduced) video.play().catch(() => {}); });
-render(location.hash.slice(1));
+
+/** A real emailed sign-in link lands here as ?emailToken=…; verify it once, then drop it from the URL. */
+function initialRender() {
+  const emailToken = new URLSearchParams(location.search).get('emailToken');
+  if (!emailToken) { render(location.hash.slice(1)); return; }
+  history.replaceState(null, '', location.pathname + '#account');
+  JellyApi.verifyEmailLink(emailToken)
+    .then((result) => { render('account'); document.querySelector('#signin-result').textContent = `Signed in. Account: ${result.accountId}.`; })
+    .catch((e) => { render('account'); document.querySelector('#signin-result').textContent = errorMessage(e); });
+}
+initialRender();
 updateConnectionStatus();

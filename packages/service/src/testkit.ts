@@ -8,6 +8,7 @@ import { Merger } from "@jelly/merger";
 import { NO_TOOLS } from "@jelly/policy";
 import type { TemplateRegistry } from "@jelly/templates";
 import { keccak256, toBytes } from "viem";
+import type { SignedGrant } from "./escrow";
 import { MemoryEscrow } from "./escrow";
 import { JobService } from "./service";
 import { MemoryJobStore } from "./store";
@@ -46,7 +47,9 @@ export const defaultHandler: MockHandler = (_host, req) => {
   return mockResponse({ content: SUMMARY, usage: { inputTokens: 100, cachedInputTokens: 0, outputTokens: 40 } });
 };
 
-export function makeService(over: { handler?: MockHandler; items?: string[]; templates?: TemplateRegistry } = {}) {
+export function makeService(
+  over: { handler?: MockHandler; items?: string[]; templates?: TemplateRegistry; studioGrant?: SignedGrant; creditsGrant?: SignedGrant } = {},
+) {
   const clock = { now: 1_800_000_000_000 };
   const now = () => clock.now;
   const g = makeGateway(over.handler ?? defaultHandler);
@@ -109,6 +112,8 @@ export function makeService(over: { handler?: MockHandler; items?: string[]; tem
     spentMicros: async (jobKey) => (await g.budget.usage(jobBudgetKey(jobKey))).usedMicros,
     now,
     ...(over.templates ? { templates: over.templates } : {}),
+    ...(over.studioGrant ? { studioGrant: over.studioGrant } : {}),
+    ...(over.creditsGrant ? { creditsGrant: over.creditsGrant } : {}),
   });
 
   return { service, escrow, store, bus, clock, provider: g.provider, receipts: g.receipts };

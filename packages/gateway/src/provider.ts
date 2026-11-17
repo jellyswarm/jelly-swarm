@@ -75,7 +75,28 @@ export type OpenAICompatOptions = {
    * until a reader is supplied, TEE-only calls fail closed in the gateway.
    */
   readAttestation?: AttestationReader;
+  /**
+   * A 429 is retried against the *same* host before the gateway's own
+   * "one retry, on a different host" policy ever sees it — with one host
+   * configured (common in dev, and not unheard of in production), that
+   * policy's retry just re-hits the same rate limit with no delay. Honors
+   * `Retry-After` when the host sends one, else backs off by attempt number.
+   */
+  rateLimitRetries?: number;
+  maxRateLimitDelayMs?: number;
+  sleep?: (ms: number) => Promise<void>;
 };
+
+const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Seconds or an HTTP-date, per RFC 9110 — null if absent or unparseable. */
+function retryAfterMs(header: string | null): number | null {
+  if (!header) return null;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const at = Date.parse(header);
+  return Number.isFinite(at) ? Math.max(0, at - Date.now()) : null;
+}
 
 /** Client for any OpenAI-compatible `/chat/completions` endpoint (hosted routers, vLLM, TEE hosts). */
 export class OpenAICompatProvider implements ChatProvider {
@@ -93,16 +114,29 @@ export class OpenAICompatProvider implements ChatProvider {
       ...(req.seed !== undefined ? { seed: req.seed } : {}),
     };
 
+    const url = `${host.baseUrl.replace(/\/+$/, "")}/chat/completions`;
+    const headers = { "content-type": "application/json", ...(key ? { authorization: `Bearer ${key}` } : {}) };
+    const sleep = this.opts.sleep ?? defaultSleep;
+    const maxAttempts = 1 + (this.opts.rateLimitRetries ?? 3);
+    const maxDelayMs = this.opts.maxRateLimitDelayMs ?? 15_000;
+
     let res: Response;
-    try {
-      res = await doFetch(`${host.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
-        method: "POST",
-        headers: { "content-type": "application/json", ...(key ? { authorization: `Bearer ${key}` } : {}) },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(this.opts.timeoutMs ?? 120_000),
-      });
-    } catch (e) {
-      throw new ProviderError(host.id, null, `request failed: ${e instanceof Error ? e.name : "error"}`);
+    for (let attempt = 1; ; attempt++) {
+      try {
+        res = await doFetch(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(this.opts.timeoutMs ?? 120_000),
+        });
+      } catch (e) {
+        throw new ProviderError(host.id, null, `request failed: ${e instanceof Error ? e.name : "error"}`);
+      }
+      if (res.status !== 429 || attempt >= maxAttempts) break;
+      // A fresh or low-tier key's rate limit resets fast; a single unpaced retry on the engine's
+      // own "different host" policy would just re-hit it immediately, so back off here instead.
+      const delayMs = Math.min(maxDelayMs, retryAfterMs(res.headers.get("retry-after")) ?? 500 * 2 ** (attempt - 1));
+      await sleep(delayMs);
     }
     // Never include the response body in the error: it may echo job content into logs.
     if (!res.ok) throw new ProviderError(host.id, res.status, `host returned HTTP ${res.status}`);

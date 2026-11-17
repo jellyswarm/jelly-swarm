@@ -25,4 +25,8 @@ export const COPY = {
   referralSelf: "This looks like a self-referral, so no credit was given.",
   referralAlreadyUsed: "This account already has a referral on record.",
   referralCapReached: "You have reached this month's referral credit limit.",
+  freeTierNotConfigured: "The free tier is not available right now.",
+  overFreeTierCap: "This job's price is above what the free tier covers. Pick fewer agents or a lower tier, or pay for it.",
+  creditsNotConfigured: "Paying with credits is not available right now.",
+  insufficientCredit: "Your credit balance does not cover this job's price.",
 } as const;

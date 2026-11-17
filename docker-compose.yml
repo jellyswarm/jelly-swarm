@@ -31,6 +31,39 @@ services:
       timeout: 3s
       retries: 30
 
+  # Optional: the app itself, containerized (see apps/api/Dockerfile, apps/web/Dockerfile).
+  # Not started by `pnpm infra:up`; run explicitly with `docker compose up api web`.
+  # SIGNER_PRIVATE_KEY and the other signing keys still need real values (see .env.example) —
+  # there is no safe default for those.
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      DATABASE_URL: postgres://jelly:jelly@postgres:5432/jelly
+      REDIS_URL: redis://redis:6379
+      PORT: "3000"
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles: ["app"]
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    environment:
+      PORT: "4173"
+    ports:
+      - "4173:4173"
+    profiles: ["app"]
+
 volumes:
   pgdata:
   redisdata:

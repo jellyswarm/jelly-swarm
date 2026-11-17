@@ -1,0 +1,22 @@
+node_modules
+**/node_modules
+.git
+.tsbuild
+**/.tsbuild
+*.tsbuildinfo
+dist
+coverage
+.env
+.env.*
+!.env.example
+
+# Foundry
+contracts/out
+contracts/cache
+contracts/broadcast
+contracts/lib
+
+# Anchor
+programs/**/target
+.anchor
+test-ledger

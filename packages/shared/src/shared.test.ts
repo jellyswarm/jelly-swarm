@@ -7,6 +7,7 @@ import {
   REFUND_CURVE_BPS,
   UnconfirmedChainError,
   formatUsd6,
+  ipPrefixOf,
   isBurnEligible,
   loadInfraEnv,
   requireConfirmed,
@@ -111,5 +112,25 @@ describe("env", () => {
   });
   test("requires every value in production", () => {
     expect(() => loadInfraEnv({ NODE_ENV: "production" })).toThrow();
+  });
+});
+
+describe("ipPrefixOf", () => {
+  test("IPv4 keeps the first three octets, zeroing the fourth", () => {
+    expect(ipPrefixOf("203.0.113.42")).toBe("203.0.113.0/24");
+  });
+  test("two addresses in the same /24 share a prefix; a different one doesn't", () => {
+    expect(ipPrefixOf("203.0.113.1")).toBe(ipPrefixOf("203.0.113.254"));
+    expect(ipPrefixOf("203.0.113.1")).not.toBe(ipPrefixOf("203.0.114.1"));
+  });
+  test("IPv6 keeps the first 48 bits (three groups)", () => {
+    expect(ipPrefixOf("2001:db8:1234:5678::1")).toBe("2001:db8:1234::/48");
+  });
+  test("IPv6 '::' compression expands correctly before truncating", () => {
+    expect(ipPrefixOf("2001:db8::1")).toBe("2001:db8:0::/48");
+    expect(ipPrefixOf("::1")).toBe("0:0:0::/48");
+  });
+  test("something that isn't an IP address is returned as its own one-member bucket", () => {
+    expect(ipPrefixOf("not-an-ip")).toBe("not-an-ip");
   });
 });

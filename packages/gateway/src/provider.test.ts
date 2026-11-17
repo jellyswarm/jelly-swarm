@@ -5,14 +5,21 @@ import { HostSpec, OpenAICompatProvider, ProviderError, costMicros, estimateToke
 
 // A local stand-in for an OpenAI-compatible host.
 let lastRequest: { auth: string | null; body: Record<string, unknown> } | undefined;
-let mode: "ok" | "500" | "garbage" | "tools" = "ok";
+let mode: "ok" | "500" | "garbage" | "tools" | "429-then-ok" | "429-forever" = "ok";
+let requestCount = 0;
+let lastRetryAfter: string | undefined;
 const server = Bun.serve({
   port: 0,
   async fetch(req) {
     if (new URL(req.url).pathname !== "/v1/chat/completions") return new Response("not found", { status: 404 });
+    requestCount++;
     lastRequest = { auth: req.headers.get("authorization"), body: (await req.json()) as Record<string, unknown> };
     if (mode === "500") return new Response("secret upstream detail", { status: 500 });
     if (mode === "garbage") return Response.json({ hello: "world" });
+    if (mode === "429-forever") return new Response("slow down", { status: 429, headers: lastRetryAfter ? { "retry-after": lastRetryAfter } : {} });
+    if (mode === "429-then-ok" && requestCount < 3) {
+      return new Response("slow down", { status: 429, headers: lastRetryAfter ? { "retry-after": lastRetryAfter } : {} });
+    }
     return Response.json(
       {
         choices: [
@@ -99,6 +106,36 @@ describe("OpenAI-compatible provider", () => {
     await expect(new OpenAICompatProvider().chat(host, request)).rejects.toThrow(ProviderError);
     const dead = { ...host, baseUrl: "http://127.0.0.1:1/v1" };
     await expect(new OpenAICompatProvider({ timeoutMs: 2000 }).chat(dead, request)).rejects.toThrow(ProviderError);
+  });
+
+  test("a 429 is retried against the same host and succeeds once the rate limit clears", async () => {
+    mode = "429-then-ok";
+    requestCount = 0;
+    lastRetryAfter = undefined;
+    const delays: number[] = [];
+    const res = await new OpenAICompatProvider({ sleep: async (ms) => { delays.push(ms); } }).chat(host, request);
+    expect(res.content).toBe("42 holders");
+    expect(requestCount).toBe(3); // two 429s, then the real answer
+    expect(delays).toHaveLength(2);
+  });
+
+  test("a 429's Retry-After header sets the wait, capped at maxRateLimitDelayMs", async () => {
+    mode = "429-then-ok";
+    requestCount = 0;
+    lastRetryAfter = "30"; // seconds — above the cap below
+    const delays: number[] = [];
+    await new OpenAICompatProvider({ sleep: async (ms) => { delays.push(ms); }, maxRateLimitDelayMs: 5000 }).chat(host, request);
+    expect(delays).toEqual([5000, 5000]);
+  });
+
+  test("a 429 that never clears still becomes a ProviderError, after the configured retries", async () => {
+    mode = "429-forever";
+    requestCount = 0;
+    lastRetryAfter = undefined;
+    const err = await new OpenAICompatProvider({ sleep: async () => {}, rateLimitRetries: 2 }).chat(host, request).catch((e) => e);
+    expect(err).toBeInstanceOf(ProviderError);
+    expect(err.status).toBe(429);
+    expect(requestCount).toBe(3); // the first attempt plus 2 retries
   });
 });
 

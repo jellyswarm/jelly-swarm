@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { ProofOfWork, RedisBanStore, RedisPowStore, RedisWindowCounter } from "@jelly/abuse";
 import { AuthService, RealPasskeyVerifier } from "@jelly/auth";
 import { RedisBudgetStore } from "@jelly/budget-guard";
 import { Checker } from "@jelly/checker";
@@ -10,9 +11,9 @@ import { startKeeper } from "@jelly/keeper";
 import { InMemoryEventBus } from "@jelly/live";
 import { Merger } from "@jelly/merger";
 import { ReceiptChain, ZERO32 } from "@jelly/receipts";
-import { type Escrow, JobService, MemoryEscrow, ViemEscrow, type ViemEscrowAddresses } from "@jelly/service";
-import { loadInfraEnv } from "@jelly/shared";
-import { NullFundingGraph } from "@jelly/settlement";
+import { type Escrow, JobService, MemoryEscrow, signGrant, ViemEscrow, type ViemEscrowAddresses } from "@jelly/service";
+import { FREE_TIER, loadInfraEnv } from "@jelly/shared";
+import { NullFundingGraph, RedisIpHistory } from "@jelly/settlement";
 import { MemoryTemplateRegistry } from "@jelly/templates";
 import { EvmChainReader, EvmOnlyAccountInspector, WORKER_MANIFEST, WorkerTools } from "@jelly/tools";
 import { FallbackFacilitator, LocalEvmFacilitator, RedisNonceStore } from "@jelly/x402";
@@ -20,6 +21,8 @@ import { Redis } from "ioredis";
 import { type Address, type Hex, type PublicClient, createPublicClient, createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { createApp, websocket } from "./app";
+import { logger } from "./logger";
+import { ResendMailer } from "./mailer";
 import { defaultModelHost } from "./model-hosts";
 
 /**
@@ -58,6 +61,9 @@ export async function buildApp() {
     rpId: authRpId,
     origin: authOrigin,
   });
+  const webUrl = process.env.WEB_PUBLIC_URL ?? authOrigin;
+  const mailer = process.env.RESEND_API_KEY ? new ResendMailer(process.env.RESEND_API_KEY) : undefined;
+  if (!mailer) warnings.push("RESEND_API_KEY is not set: email sign-in dev-bypasses the mailer, returning the link token directly in the response.");
 
   // ── model routing ──
   const signerKey = requireHex("SIGNER_PRIVATE_KEY", process.env.SIGNER_PRIVATE_KEY);
@@ -94,6 +100,37 @@ export async function buildApp() {
 
   // ── settlement chain: Escrow ──
   const escrow = buildEscrow(publicClient, warnings);
+
+  // ── free tier: the studio pays from its own vault balance, never the caller's (§10.3) ──
+  const studioAccount = privateKeyToAccount(requireHex("STUDIO_PRIVATE_KEY", process.env.STUDIO_PRIVATE_KEY ?? signerKey));
+  const studioGrant = await signGrant(studioAccount, escrow.grantDomain(), {
+    owner: studioAccount.address,
+    keyId: ZERO32,
+    perJobCapUsd6: FREE_TIER.maxQuoteUsd6,
+    perDayCapUsd6: 50_000_000n, // the studio's own daily free-tier budget, not a per-caller limit
+    expiresAt: BigInt(Math.floor(Date.now() / 1000) + 10 * 365 * 24 * 3600),
+    periodCapUsd6: 0n,
+    minCoverageBps: 0,
+  });
+  // §11.4 paying with a credit balance: same studio vault, a separate keyId so its daily spend
+  // cap is tracked apart from the free tier's — a burst of credit-funded jobs should never eat
+  // into the free tier's budget, or the other way around.
+  const creditsGrant = await signGrant(studioAccount, escrow.grantDomain(), {
+    owner: studioAccount.address,
+    keyId: `0x${"01".repeat(32)}` as Hex,
+    perJobCapUsd6: 50_000_000n, // $50 — well above any plausible accumulated credit balance
+    perDayCapUsd6: 500_000_000n, // $500/day studio-wide, across every credits-funded job
+    expiresAt: BigInt(Math.floor(Date.now() / 1000) + 10 * 365 * 24 * 3600),
+    periodCapUsd6: 0n,
+    minCoverageBps: 0,
+  });
+  if (escrow instanceof MemoryEscrow) {
+    escrow.vault.set(studioAccount.address.toLowerCase(), 100_000_000_000n); // dev-only: a MemoryEscrow vault has no real money to run out of
+  } else {
+    warnings.push(
+      "Free-tier and credits-funded jobs are signed for, but the studio's BalanceVault balance must actually be funded on-chain for either to run — this only signs the grants, it never deposits anything.",
+    );
+  }
 
   // ── quoting ──
   const quoterAccount = privateKeyToAccount(requireHex("QUOTER_PRIVATE_KEY", process.env.QUOTER_PRIVATE_KEY ?? signerKey));
@@ -144,6 +181,8 @@ export async function buildApp() {
     bus,
     verdictSigner: signer,
     templates,
+    studioGrant,
+    creditsGrant,
   });
 
   // ── x402 payment facilitation ──
@@ -154,6 +193,11 @@ export async function buildApp() {
     new LocalEvmFacilitator({ network: escrow.network, publicClient: neverPublicClient() }),
   );
   const nonces = new RedisNonceStore(redis);
+
+  // ── free-tier abuse resistance (§10.3): PoW, device/IP rate buckets, and ban escalation ──
+  const bans = new RedisBanStore(redis);
+  const pow = new ProofOfWork(new RedisPowStore(redis));
+  const rateLimits = new RedisWindowCounter(redis);
 
   const devFunding = escrow instanceof MemoryEscrow;
   if (devFunding) {
@@ -167,12 +211,16 @@ export async function buildApp() {
     facilitator,
     nonces,
     publicUrl: process.env.PUBLIC_URL ?? "http://localhost:3000",
-    onError: (e) => console.error("[api] internal error:", e),
+    onError: (e) => logger.error({ err: e }, "internal error"),
     stats: { store, studioOperated: true },
     corsOrigins: (process.env.CORS_ORIGINS ?? "http://localhost:4173,http://127.0.0.1:4173").split(",").map((s) => s.trim()).filter(Boolean),
     devFunding,
     watches,
     auth,
+    webUrl,
+    ipHistory: new RedisIpHistory(redis),
+    freeTier: { bans, pow, rateLimits },
+    ...(mailer ? { mailer } : {}),
   });
 
   // ── settlement-keeper: finalize, audit sampling, and the referral/volume hooks nothing else calls ──
@@ -181,12 +229,14 @@ export async function buildApp() {
     escrow,
     classify: { studioWallets: new Set(), graph: new NullFundingGraph() },
     onEvent: (e) => {
-      if (e.type === "finalized") service.onJobFinalized(e.jobKey).catch((err) => console.error("[bootstrap] onJobFinalized failed:", err));
-      if (e.type === "keeper_error") console.error("[bootstrap] settlement-keeper tick failed:", e.error);
+      if (e.type === "finalized") {
+        service.onJobFinalized(e.jobKey).catch((err) => logger.error({ err, jobKey: e.jobKey }, "onJobFinalized failed"));
+      }
+      if (e.type === "keeper_error") logger.error({ err: e.error }, "settlement-keeper tick failed");
     },
   });
 
-  for (const w of warnings) console.warn(`[bootstrap] ${w}`);
+  for (const w of warnings) logger.warn(w);
   return {
     app,
     websocket,

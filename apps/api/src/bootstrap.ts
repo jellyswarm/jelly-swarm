@@ -9,7 +9,7 @@ import { Gateway, type HostInput, OpenAICompatProvider } from "@jelly/gateway";
 import { startKeeper } from "@jelly/keeper";
 import { InMemoryEventBus } from "@jelly/live";
 import { Merger } from "@jelly/merger";
-import { ReceiptChain } from "@jelly/receipts";
+import { ReceiptChain, ZERO32 } from "@jelly/receipts";
 import { type Escrow, JobService, MemoryEscrow, ViemEscrow, type ViemEscrowAddresses } from "@jelly/service";
 import { loadInfraEnv } from "@jelly/shared";
 import { NullFundingGraph } from "@jelly/settlement";
@@ -197,7 +197,6 @@ export async function buildApp() {
   };
 }
 
-const ZERO32 = "0x0000000000000000000000000000000000000000000000000000000000000" as Hex;
 const BUDGET_LIMITS = {
   accountDayMicros: 500_000_000_000n,
   laneDayMicros: { priority: 5_000_000_000_000n, paid: 5_000_000_000_000n, free: 500_000_000_000n, deferred: 500_000_000_000n },

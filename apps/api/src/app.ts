@@ -1,5 +1,5 @@
 import { trpcServer } from "@hono/trpc-server";
-import { type BanStore, type ProofOfWork, type WindowCounter, checkAndConsume, checkFreeTierPolicy, onJobRejected } from "@jelly/abuse";
+import { type AsnLookup, type BanStore, type ProofOfWork, type WindowCounter, checkAndConsume, checkFreeTierPolicy, onJobRejected } from "@jelly/abuse";
 import { AuthError, type AuthService } from "@jelly/auth";
 import type { WatchStore } from "@jelly/db";
 import type { EventBus } from "@jelly/live";
@@ -70,12 +70,12 @@ export type AppDeps = {
   /** Powers the self-referral "shared IP prefix within 24h" signal. Omit to leave it always "no match". */
   ipHistory?: IpHistory;
   /**
-   * §10.3 free tier: a PoW challenge, device/IP rate buckets, and ban escalation, all sitting in
-   * front of `JobService.runFree`. Needs `auth` too, for the device cookie. Omit to serve neither
-   * `POST /v1/pow/challenge` nor the `"free"` route on `POST /v1/jobs`. ASN rate-limiting is not
-   * implemented — there is no ASN lookup wired in — so `perAsnPerDay` is never enforced.
+   * §10.3 free tier: a PoW challenge, device/IP/ASN rate buckets, and ban escalation, all sitting
+   * in front of `JobService.runFree`. Needs `auth` too, for the device cookie. Omit to serve
+   * neither `POST /v1/pow/challenge` nor the `"free"` route on `POST /v1/jobs`. `asnLookup` is
+   * optional on top of that: omit it and `perAsnPerDay` simply goes unenforced, same as before.
    */
-  freeTier?: { bans: BanStore; pow: ProofOfWork; rateLimits: WindowCounter };
+  freeTier?: { bans: BanStore; pow: ProofOfWork; rateLimits: WindowCounter; asnLookup?: AsnLookup };
 };
 
 type Env = { Variables: { account: Account } };
@@ -206,7 +206,7 @@ export function createApp(deps: AppDeps) {
       if (!deps.freeTier) throw new ServiceError("not_ready", COPY.freeTierNotConfigured);
       const deviceId = deviceIdFor(c);
       if (!deviceId) throw new ServiceError("forbidden", COPY.unauthorized);
-      const { bans, pow, rateLimits } = deps.freeTier;
+      const { bans, pow, rateLimits, asnLookup } = deps.freeTier;
       if ((await bans.isBanned("device", deviceId)) || (await bans.isBanned("account", account.id))) {
         throw new ServiceError("forbidden", COPY.freeTierBanned);
       }
@@ -214,7 +214,13 @@ export function createApp(deps: AppDeps) {
         throw new ServiceError("invalid", COPY.powInvalid);
       }
       const ip = clientIpFor(c);
-      const refusal = await checkAndConsume(rateLimits, FREE_TIER, { deviceId, ipPrefix: ip ? ipPrefixOf(ip) : "unknown" }, Date.now());
+      const asn = ip && asnLookup ? await asnLookup.lookup(ip) : undefined;
+      const refusal = await checkAndConsume(
+        rateLimits,
+        FREE_TIER,
+        { deviceId, ipPrefix: ip ? ipPrefixOf(ip) : "unknown", ...(asn !== undefined ? { asn } : {}) },
+        Date.now(),
+      );
       if (refusal) throw new ServiceError("forbidden", COPY.freeTierRateLimited);
       const quote = await deps.store.getQuote(b.quoteId);
       const policy = quote ? checkFreeTierPolicy(quote.spec.task, quote.spec.items.map((i) => i.raw)) : null;

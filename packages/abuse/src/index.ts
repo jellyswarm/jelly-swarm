@@ -5,4 +5,6 @@ export * from "./redis-buckets";
 export * from "./policy";
 export * from "./bans";
 export * from "./redis-bans";
+export * from "./asn";
+export * from "./redis-asn";
 export { COPY as ABUSE_COPY } from "./copy";

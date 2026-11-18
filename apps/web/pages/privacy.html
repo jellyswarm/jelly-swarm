@@ -1,0 +1,43 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Privacy Policy — JellySwarm</title><link rel="stylesheet" href="../style.css"><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Nunito:wght@600;700;800;900;1000&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"><script src="../app.js?v=mobile2" defer></script><script src="../transition.js" defer></script></head>
+<body><header class="topbar"><a class="brand" href="/"><img src="../assets/jelly-logo.jpg" alt="">JellySwarm</a><a href="/dashboard" class="button nav-dashboard">Dashboard <span>→</span></a><nav class="navlinks" id="navigation" aria-label="Main navigation"><a href="/">Home</a><a href="agents">The team</a><a href="how-it-works">How it works</a><a href="system">The system</a><a href="/dashboard">Dashboard ↗</a></nav><button class="menu-button" aria-label="Open menu" aria-expanded="false" aria-controls="navigation"><span></span><span></span></button></header>
+<main><section class="section-wrap" style="padding:70px 10px 40px"><span class="eyebrow">LEGAL</span><h1 style="max-width:900px;margin:16px 0;font-size:clamp(2.6rem,5.5vw,4.5rem)">Privacy Policy</h1><p style="max-width:700px;font-size:18px">Last updated: 17 November 2026. This explains what JellySwarm collects, why, and who it's shared with.</p>
+<div class="legal-body" style="max-width:760px;margin-top:40px">
+
+<p><strong>This is a draft written for a service still in development, not a final, lawyer-reviewed policy.</strong> Have it reviewed against your actual data flows, your jurisdiction's requirements (e.g. GDPR, CCPA), and a lawyer before relying on it in production.</p>
+
+<h3 style="margin-top:40px">What we collect, and why</h3>
+<p><strong>An anonymous device identifier.</strong> On your first visit we set a signed, random cookie that identifies this browser — not you by name. It's used to enforce the free-tier limits (one free job per device, ever) and to detect likely self-referral (the same device claiming its own referral code). It is never used for cross-site advertising tracking.</p>
+<p><strong>Sign-in identity, if you choose one.</strong> JellySwarm can be used anonymously via an access key, or signed into with a passkey, an external wallet, or an email link:</p>
+<ul style="list-style:disc;padding-left:22px;line-height:1.6;font-weight:400;font-size:17px;color:#62596d">
+<li><em>Passkeys</em> use public-key cryptography. We store a public key and a credential id — never a password, never a private key.</li>
+<li><em>Wallet sign-in</em> stores the wallet address you signed with, nothing else.</li>
+<li><em>Email sign-in</em> never stores your email address in plaintext. We store a one-way HMAC of it (a cryptographic fingerprint), which is enough to recognize you on a later sign-in but cannot be reversed back into your address. The address itself is held only long enough to send the sign-in link, then discarded.</li>
+</ul>
+<p><strong>Your job's content.</strong> The request and item list you submit for a job, and the results produced, are what you're paying us to process — they're stored so you can read your own job back, and sent to the model provider that runs the job (currently OpenRouter and whichever model host it routes to). A checked result's source links point to pages fetched over the open web, which may themselves log the request per their own policies.</p>
+<p><strong>Your IP address, briefly.</strong> We use your IP address for two abuse-prevention purposes, and don't retain the full address beyond that: a coarse network "prefix" (e.g. the first three octets of an IPv4 address) is checked against recent referral sign-ups from the same network, and against the free tier's per-network daily limit. For the latter, your IP is sent to <a href="https://stat.ripe.net">RIPEstat</a>, a public lookup run by RIPE NCC (a regional internet registry), solely to ask which network operator it belongs to — no other data about you is sent with that request.</p>
+<p><strong>Credits and referrals.</strong> If you refer someone or are referred, we record the relationship and the resulting credit balance against your account. Credits expire 90 days after being issued if unused.</p>
+
+<h3 style="margin-top:40px">What we never collect</h3>
+<p>No passwords (there is no password-based sign-in at all). No government ID or identity documents. No plaintext email addresses, ever, as described above.</p>
+
+<h3 style="margin-top:40px">Who we share it with</h3>
+<p>Only the service providers needed to run the product: the model-inference provider that runs your job, an email provider if you use email sign-in, and the public IP-lookup service described above. We do not sell personal data, and we do not share it for advertising.</p>
+
+<h3 style="margin-top:40px">Money and wallets</h3>
+<p>We never ask for or hold your wallet's private key or seed phrase. Payments happen through your own wallet signing a transaction, or through a non-custodial on-chain escrow contract — funds sit in that contract, not in a company account, until the work is checked and settled.</p>
+
+<h3 style="margin-top:40px">Your choices</h3>
+<p>You can use JellySwarm anonymously without ever signing in. If you've signed in and want your identity data removed or exported, contact us at the address below — job records tied to an active or disputed job may need to be retained until that job's dispute window closes.</p>
+
+<h3 style="margin-top:40px">Children</h3>
+<p>JellySwarm is not directed at, and should not be used by, anyone under 16.</p>
+
+<h3 style="margin-top:40px">Changes</h3>
+<p>If this policy changes materially, we'll update the date at the top of this page.</p>
+
+<h3 style="margin-top:40px">Contact</h3>
+<p>Questions about this policy: <a href="mailto:privacy@jellyswarm.example">privacy@jellyswarm.example</a> — replace with a real address before this goes live.</p>
+
+</div></section></main>
+<footer><div class="footer-top"><a class="brand" href="/"><img src="../assets/jelly-logo.jpg" alt="">JellySwarm</a><p>Little agents. Big teamwork.</p><div><a href="agents">The team</a><a href="how-it-works">How it works</a><a href="system">The system</a><a href="terms">Terms</a><a href="privacy">Privacy</a></div></div><div class="footer-word">JellySwarm</div></footer>
+</body></html>

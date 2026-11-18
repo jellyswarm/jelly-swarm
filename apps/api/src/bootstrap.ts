@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { ProofOfWork, RedisBanStore, RedisPowStore, RedisWindowCounter } from "@jelly/abuse";
+import { ProofOfWork, RedisBanStore, RedisCachedAsnLookup, RedisPowStore, RedisWindowCounter, RipeAsnLookup } from "@jelly/abuse";
 import { AuthService, RealPasskeyVerifier } from "@jelly/auth";
 import { RedisBudgetStore } from "@jelly/budget-guard";
 import { Checker } from "@jelly/checker";
@@ -198,6 +198,8 @@ export async function buildApp() {
   const bans = new RedisBanStore(redis);
   const pow = new ProofOfWork(new RedisPowStore(redis));
   const rateLimits = new RedisWindowCounter(redis);
+  // stat.ripe.net: free, public, no API key. Caches each address's ASN in Redis for a day.
+  const asnLookup = new RedisCachedAsnLookup(new RipeAsnLookup(), redis);
 
   const devFunding = escrow instanceof MemoryEscrow;
   if (devFunding) {
@@ -219,7 +221,7 @@ export async function buildApp() {
     auth,
     webUrl,
     ipHistory: new RedisIpHistory(redis),
-    freeTier: { bans, pow, rateLimits },
+    freeTier: { bans, pow, rateLimits, asnLookup },
     ...(mailer ? { mailer } : {}),
   });
 

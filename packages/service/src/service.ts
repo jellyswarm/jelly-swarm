@@ -126,8 +126,9 @@ export type ServiceDeps = {
   /**
    * §11.4 paying with a credit balance: a second studio grant, separate from `studioGrant` so a
    * free-tier job and a credits-funded job never share one daily spend cap. The studio still
-   * funds the real job from its own vault; this debits the caller's credit ledger by the same
-   * amount instead of it costing them nothing. Omit to refuse every credits-funded run.
+   * funds the real job from its own vault; this debits the caller's credit ledger by whatever
+   * the job actually settles for, instead of it costing them nothing. Omit to refuse every
+   * credits-funded run.
    */
   creditsGrant?: SignedGrant;
 };
@@ -389,9 +390,8 @@ export class JobService {
     if (stored.state !== "awaiting_payment") return this.jobView(stored);
     await this.deps.escrow.fundFromVault(stored.jobId, this.deps.creditsGrant, stored.lines.totalUsd6);
     // Debited once the job actually settles (see `execute`), for whatever it actually comes to —
-    // not the full quoted price up front. A refund for failed rows returns to the studio's own
-    // vault either way (it funded the job), so charging the full price here would double-dip:
-    // the caller's credit gone *and* no corresponding value received for the refunded rows.
+    // not the full quoted price up front, so a row that fails checking is never charged for
+    // (same "pay only for what passes" guarantee as every other funding route).
     return this.jobView(await this.start(stored));
   }
 

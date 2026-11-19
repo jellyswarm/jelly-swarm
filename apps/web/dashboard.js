@@ -8,7 +8,7 @@ function feedback(root, message) {
 }
 function addDraftCard(list, title, detail, status, onRemove) {
   const card = document.createElement('article'); card.className = 'draft-card';
-  const chip = document.createElement('span'); chip.className = 'draft-meta'; chip.textContent = status;
+  const chip = document.createElement('span'); chip.className = 'draft-meta'; chip.dataset.tone = 'idle'; chip.textContent = status;
   const heading = document.createElement('h3'); heading.textContent = title;
   const description = document.createElement('p'); description.textContent = detail;
   card.append(chip, heading, description);
@@ -34,9 +34,8 @@ const views = {
   'new-job': { title: 'Plan a job.', html: `<div class="dash-panel"><span class="eyebrow">FANOUT · NEW JOB</span><h2>What can the swarm help with?</h2><p>Your first small job is planned to be free. This asks the real JellySwarm service for a fixed price before anything runs.</p><form id="quote-form"><label for="request">Your request</label><textarea id="request" required maxlength="4000" placeholder="For each item, give a holder count and a source…"></textarea><label for="items">Items (one per line)</label><textarea id="items" required maxlength="20000" rows="4" placeholder="tok-0&#10;tok-1&#10;tok-2"></textarea><label for="columns">Columns to fill (comma separated)</label><input id="columns" maxlength="200" placeholder="result"><div class="two-col"><div><label for="tier">Worker tier</label><select id="tier"><option value="open">Open · $0.005 / agent</option><option value="standard" selected>Standard · $0.015 / agent</option><option value="sealed">Sealed · $0.04 / agent</option></select></div><div><label for="agents">Max agents (up to 247)</label><input id="agents" type="number" min="1" max="247" step="1" value="20" required></div></div><div class="notice">The price is fixed by the service before anything runs; this excludes data and tool charges above the quoted cap.</div><div class="form-actions"><button class="button primary" type="submit">Get a real quote →</button></div><div id="estimate" aria-live="polite"></div><p class="draft-feedback" data-feedback role="status"></p></form></div>` },
   review: { title: 'Review your job.', html: `<div class="dash-panel"><span class="eyebrow">ONE LAST LOOK</span><h2>Ready for the swarm?</h2><p>This is a real, fixed-price quote from the service.</p><dl class="review-details"><div><dt>Request</dt><dd data-detail="request"></dd></div><div><dt>Items</dt><dd data-detail="items"></dd></div><div><dt>Columns</dt><dd data-detail="columns"></dd></div><div><dt>Worker tier</dt><dd data-detail="tier"></dd></div><div><dt>Agents</dt><dd data-detail="agents"></dd></div><div><dt>Fixed price</dt><dd data-detail="price"></dd></div></dl><div class="notice" data-dev-notice hidden>No real chain is connected yet: running this job uses a dev-only stand-in for payment, not a real wallet. No money moves.</div><div class="form-actions"><button class="button outline" data-go="new-job">Edit request</button><button class="button outline" id="run-job-x402" type="button">Pay with wallet (x402) →</button><button class="button primary" id="run-job">Run this job →</button></div><p class="draft-feedback" data-feedback role="status"></p></div>` },
   jobs: { title: 'My jobs.', html: `<div class="dash-panel"><span class="eyebrow">YOUR SWARM</span><h2>Your jobs, together.</h2><p>Real jobs from the connected service, for the access key stored on this device.</p><div class="draft-list" id="job-list"></div><div class="form-actions"><button class="button outline" data-go="new-job">Plan a job →</button></div><p class="draft-feedback" data-feedback role="status"></p></div>` },
-  receipts: { title: 'Receipts.', html: `<div class="dash-panel empty"><img src="assets/05-receipt.webp" alt=""><h3>A clear trail, all in one place.</h3><p>Open a job from "My jobs" to see its receipts and transcript once it has run.</p><div class="form-actions"><button class="button outline" data-go="jobs">Open my jobs →</button></div></div>` },
   watch: { title: 'Picket watch.', html: `<div class="dash-panel"><span class="eyebrow">PICKET · WATCHES</span><h2>Keep a little lookout.</h2><p>Choose what you would like to keep an eye on.</p><form id="watch-form" class="watch-form"><label for="watch-target">What would you like to watch?</label><input id="watch-target" type="text" required maxlength="200" placeholder="Wallet, token, account or topic"><label for="watch-condition">What should we look for?</label><input id="watch-condition" type="text" required maxlength="300" placeholder="Describe the activity or change"><div class="notice">Picket's watch engine isn't built yet. This saves your watch on the service for real; nothing is monitored and no alert will be sent.</div><div class="form-actions"><button class="button primary" type="submit">Save a watch →</button></div><p class="draft-feedback" data-feedback role="status"></p></form><div class="draft-list" id="watch-list"></div></div>` },
-  account: { title: 'Your account.', html: `<div class="dash-panel"><span class="eyebrow">ACCOUNT</span><h2>Credits and referrals.</h2><p>Real balances and codes from the connected service, for the access key stored on this device.</p><dl class="review-details"><div><dt>Credit balance</dt><dd id="credit-balance">…</dd></div><div><dt>Your referral code</dt><dd id="referral-code">…</dd></div></dl><div class="notice">Referring yourself (same device, same funding wallet) is blocked and recorded, but never credited. Referrer credit pays out once the referee's first job over $1 finalizes.</div><form id="referral-form"><label for="referral-input">Have a referral code?</label><div class="two-col"><input id="referral-input" type="text" maxlength="20" placeholder="Their code"><button class="button outline" type="submit">Use code</button></div></form><p class="draft-feedback" data-feedback role="status"></p><h3 style="margin-top:1.5rem">Sign in</h3><p>Passkey, wallet and email link all sign in for real, on the connected service. Each replaces the key stored on this device — jobs made anonymously under the old key stay there, not under the signed-in identity.</p><div class="two-col"><button class="button outline" type="button" id="passkey-register">Create a passkey</button><button class="button outline" type="button" id="passkey-login">Sign in with passkey</button></div><div class="form-actions"><button class="button outline" type="button" id="wallet-login">Sign in with wallet</button></div><div class="two-col"><input id="email-input" type="email" maxlength="200" placeholder="you@example.com"><button class="button outline" type="button" id="email-request">Email me a link</button></div><div id="email-dev-link"></div><p id="signin-result" class="draft-feedback" role="status"></p><h3 style="margin-top:1.5rem">Top up a wallet-bound key</h3><p>Pays over x402 from your own connected wallet (needs a wallet extension like MetaMask, and real USDC on Base). This moves real funds once a real chain is wired in.</p><div class="two-col"><input id="topup-owner" type="text" maxlength="42" placeholder="Owner wallet address (0x…)"><input id="topup-amount" type="text" maxlength="12" placeholder="Amount USD (min 5)"></div><div class="form-actions"><button class="button outline" id="topup-submit" type="button">Pay with wallet (x402)</button></div><div id="topup-result"></div></div>` },
+  account: { title: 'Your account.', html: `<div class="dash-panel"><span class="eyebrow">ACCOUNT</span><h2>Credits and referrals.</h2><p>Real balances and codes from the connected service, for the access key stored on this device.</p><dl class="review-details"><div><dt>Credit balance</dt><dd id="credit-balance">…</dd></div><div><dt>Your referral code</dt><dd id="referral-code">…</dd></div></dl><div class="notice">Referring yourself (same device, same funding wallet) is blocked and recorded, but never credited. Referrer credit pays out once the referee's first job over $1 finalizes.</div><form id="referral-form"><label for="referral-input">Have a referral code?</label><div class="two-col"><input id="referral-input" type="text" maxlength="20" placeholder="Their code"><button class="button outline" type="submit">Use code</button></div></form><p class="draft-feedback" data-feedback role="status"></p><h3 style="margin-top:1.5rem">Sign in</h3><p>Passkey, wallet and email link all sign in for real, on the connected service. Each replaces the key stored on this device — jobs made anonymously under the old key stay there, not under the signed-in identity.</p><div class="two-col"><button class="button outline" type="button" id="passkey-register">Create a passkey</button><button class="button outline" type="button" id="passkey-login">Sign in with passkey</button></div><div class="form-actions"><button class="button outline" type="button" id="wallet-login">Sign in with wallet</button></div><div class="two-col"><input id="email-input" type="email" maxlength="200" placeholder="you@example.com"><button class="button outline" type="button" id="email-request">Email me a link</button></div><div id="email-dev-link"></div><p id="signin-result" class="draft-feedback" role="status"></p><h3 style="margin-top:1.5rem">Top up a wallet-bound key</h3><p>Pays over x402 from the wallet you connect at the top of the dashboard (real USDC on Base). This moves real funds once a real chain is wired in.</p><div class="two-col"><input id="topup-owner" type="text" maxlength="42" placeholder="Owner wallet address (0x…)"><input id="topup-amount" type="text" maxlength="12" placeholder="Amount USD (min 5)"></div><div class="form-actions"><button class="button outline" id="topup-submit" type="button">Pay with wallet (x402)</button></div><div id="topup-result"></div></div>` },
   stats: { title: 'Public stats.', html: `<div class="dash-panel"><span class="eyebrow">A PUBLIC METER</span><h2>Real paid volume, in the open.</h2><p>No login needed — this is the same data anyone can read at <code>GET /stats</code>.</p><div id="stats-body"><p>Loading…</p></div></div>` },
 };
 
@@ -60,7 +59,7 @@ function resultTableHtml(parsed) {
 }
 
 function disputeSectionHtml() {
-  return `<div class="dash-panel" style="margin-top:1rem"><h3>Dispute a row</h3><p>Only passed rows can be disputed, inside the dispute window. This asks the service to build the on-chain call; sending it still needs a connected wallet, which this dashboard does not have yet.</p><div class="two-col"><input id="dispute-rows" type="text" placeholder="Row numbers, comma separated (e.g. 0,2)"><button class="button outline" id="dispute-submit">Build dispute call</button></div><input id="dispute-evidence" type="text" maxlength="4000" placeholder="Evidence (optional)" style="margin-top:0.5rem;width:100%"><div id="dispute-result"></div></div>`;
+  return `<div class="dash-panel" style="margin-top:1rem"><h3>Dispute a row</h3><p>Only passed rows can be disputed, inside the dispute window. This asks the service to build the on-chain call; sending it needs your connected wallet.</p><div class="two-col"><input id="dispute-rows" type="text" placeholder="Row numbers, comma separated (e.g. 0,2)"><button class="button outline" id="dispute-submit">Build dispute call</button></div><input id="dispute-evidence" type="text" maxlength="4000" placeholder="Evidence (optional)" style="margin-top:0.5rem;width:100%"><div id="dispute-result"></div></div>`;
 }
 
 function shareSectionHtml() {
@@ -112,7 +111,7 @@ function renderJobState(root, view) {
   if (!body) return;
   const rows = view.rows || { total: 0, passed: 0, refunded: 0 };
   const lines = [
-    `<p><strong>State:</strong> ${view.state}</p>`,
+    `<p><strong>State:</strong> <span class="draft-meta" data-tone="${chipTone(view.state)}">${escapeHtml(view.state.replace(/_/g, ' '))}</span></p>`,
     `<p><strong>Agents:</strong> ${view.agents} of ${view.of}</p>`,
     `<p><strong>Quoted price:</strong> $${view.quoteUsd}</p>`,
     `<p><strong>Rows:</strong> ${rows.total} total · ${rows.passed} passed · ${rows.refunded} refunded</p>`,
@@ -166,6 +165,7 @@ async function startJobWatch(root, jobKey) {
 
 function render(id) {
   if (liveUnsubscribe) { liveUnsubscribe(); liveUnsubscribe = null; }
+  if (id === 'receipts') id = 'jobs'; // receipts live on each job's page now
   const isJobDetail = id && id.startsWith('job:');
   if (id !== 'overview' && !views[id] && !isJobDetail) id = 'overview';
   const drawer = document.querySelector('#view');
@@ -244,7 +244,7 @@ function render(id) {
     drawer.querySelector('#run-job').addEventListener('click', async () => {
       feedback(drawer, 'Starting the job…');
       try {
-        const payer = JellyApi.randomAddress();
+        const payer = (window.JellyWallet && JellyWallet.address) || JellyApi.randomAddress();
         const prepared = await JellyApi.run(pendingJob.quoteId, payer);
         const jobKey = prepared.job.jobKey;
         await JellyApi.devFund(jobKey);
@@ -259,7 +259,7 @@ function render(id) {
     drawer.querySelector('#run-job-x402').addEventListener('click', async () => {
       feedback(drawer, 'Asking your wallet to sign the payment…');
       try {
-        const payer = JellyApi.randomAddress();
+        const { address: payer } = await JellyWallet.require();
         const result = await JellyApi.runWithX402(pendingJob.quoteId, payer);
         const jobKey = result.job.jobKey;
         pendingJob = null;
@@ -277,7 +277,7 @@ function render(id) {
       if (!jobs.length) { const p = document.createElement('p'); p.textContent = 'No jobs yet. Plan one whenever you are ready.'; list.append(p); return; }
       jobs.forEach((job) => {
         const card = document.createElement('article'); card.className = 'draft-card';
-        const chip = document.createElement('span'); chip.className = 'draft-meta'; chip.textContent = job.state;
+        const chip = document.createElement('span'); chip.className = 'draft-meta'; chip.dataset.tone = chipTone(job.state); chip.textContent = job.state.replace(/_/g, ' ');
         const heading = document.createElement('h3'); heading.textContent = job.jobKey.slice(0, 10) + '…';
         const description = document.createElement('p'); description.textContent = `${job.agents} of ${job.of} agents · $${job.quoteUsd}`;
         const open = document.createElement('button'); open.type = 'button'; open.className = 'button outline'; open.textContent = 'Open';
@@ -358,6 +358,8 @@ function render(id) {
         signin.textContent = errorMessage(e);
       }
     });
+    const ownerInput = drawer.querySelector('#topup-owner');
+    if (window.JellyWallet && JellyWallet.address && !ownerInput.value) ownerInput.value = JellyWallet.address;
     drawer.querySelector('#topup-submit').addEventListener('click', async () => {
       const owner = drawer.querySelector('#topup-owner').value.trim();
       const amountUsd = drawer.querySelector('#topup-amount').value.trim();
@@ -401,13 +403,46 @@ function render(id) {
   }
 }
 
+/** Service status bubbles: checking → online / offline, rechecked every 20s and when the tab comes back. */
 function updateConnectionStatus() {
+  const els = document.querySelectorAll('[data-connection-status]');
+  els.forEach((el) => { if (!el.dataset.state) { el.dataset.state = 'checking'; el.textContent = 'Checking service…'; } });
   JellyApi.health().then((ok) => {
-    document.querySelectorAll('[data-connection-status]').forEach((el) => { el.textContent = ok ? 'Connected' : 'Not connected'; });
+    els.forEach((el) => {
+      el.dataset.state = ok ? 'online' : 'offline';
+      el.textContent = ok ? 'Service online' : 'Service offline';
+      el.title = ok ? 'The JellySwarm service is answering.' : 'The JellySwarm service is not answering. Quotes and jobs will fail until it is back.';
+    });
   }).catch(() => {});
+}
+setInterval(() => { if (!document.hidden) updateConnectionStatus(); }, 20000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) updateConnectionStatus(); });
+
+/** Colour family for a job or watch state chip. */
+function chipTone(state) {
+  if (['settled', 'finalized'].includes(state)) return 'good';
+  if (['failed', 'refunded', 'expired'].includes(state)) return 'bad';
+  if (state === 'awaiting_payment') return 'idle';
+  return 'live';
 }
 
 document.querySelectorAll('[data-view]').forEach((el) => el.addEventListener('click', () => render(el.dataset.view)));
+
+/** The ⋯ menu: account, stats and the way back to the website, out of the main bar. */
+(function moreMenu() {
+  const btn = document.querySelector('#more-button'), menu = document.querySelector('#more-menu');
+  if (!btn || !menu) return;
+  const set = (open) => { menu.hidden = !open; btn.setAttribute('aria-expanded', String(open)); };
+  btn.addEventListener('click', () => { set(menu.hidden); if (!menu.hidden) menu.querySelector('[role=menuitem]').focus(); });
+  menu.addEventListener('click', (e) => { if (e.target.closest('[role=menuitem]')) set(false); });
+  document.addEventListener('click', (e) => { if (!menu.hidden && !menu.parentElement.contains(e.target)) set(false); });
+  menu.addEventListener('keydown', (e) => {
+    const items = [...menu.querySelectorAll('[role=menuitem]')], i = items.indexOf(document.activeElement);
+    if (e.key === 'Escape') { e.stopPropagation(); set(false); btn.focus(); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length].focus(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
+  });
+})();
 window.addEventListener('hashchange', () => render(location.hash.slice(1)));
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !document.querySelector('#view').hidden) render('overview'); });
 document.querySelector('#zoom-scene').addEventListener('click', (e) => { const v = document.querySelector('.dashboard-bg').classList.toggle('zoomed'); e.currentTarget.setAttribute('aria-pressed', String(v)); e.currentTarget.setAttribute('aria-label', v ? 'Reset scene zoom' : 'Zoom scene'); });
@@ -425,5 +460,6 @@ function initialRender() {
     .then((result) => { render('account'); document.querySelector('#signin-result').textContent = `Signed in. Account: ${result.accountId}.`; })
     .catch((e) => { render('account'); document.querySelector('#signin-result').textContent = errorMessage(e); });
 }
+if (window.JellyWallet) JellyWallet.mountButton(document.querySelector('#wallet-slot'));
 initialRender();
 updateConnectionStatus();

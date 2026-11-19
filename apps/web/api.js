@@ -2,11 +2,14 @@
 const API_URL_KEY = 'jellyswarm-api-url-v1';
 const ACCESS_KEY_KEY = 'jellyswarm-access-key-v1';
 
-function apiUrl() {
-  try { return localStorage.getItem(API_URL_KEY) || window.JELLY_API_URL || 'http://localhost:3000'; }
-  catch { return window.JELLY_API_URL || 'http://localhost:3000'; }
-}
-function setApiUrl(url) { try { localStorage.setItem(API_URL_KEY, url); } catch {} }
+/**
+ * Every call goes to `/api` on this same site. serve.ts makes the real call to the API
+ * server-side, so the browser never makes a cross-origin request and never hits CORS.
+ */
+function apiUrl() { return '/api'; }
+// An absolute API URL saved by an older build would bypass the proxy and bring CORS back.
+try { localStorage.removeItem(API_URL_KEY); } catch {}
+function setApiUrl() {}
 function accessKey() { try { return localStorage.getItem(ACCESS_KEY_KEY) || ''; } catch { return ''; } }
 function setAccessKey(key) { try { localStorage.setItem(ACCESS_KEY_KEY, key); } catch {} }
 
@@ -54,9 +57,21 @@ function bufToB64u(buf) {
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
+/** The wallet picked in the dashboard's Connect wallet button (wallet.js); opens the picker if none is connected. */
+async function connectedWallet() {
+  if (!window.JellyWallet) throw new ApiError('Wallet support did not load. Reload the page.', 'no_wallet', 0);
+  try {
+    const { provider, address } = await window.JellyWallet.require();
+    if (!provider || !address) throw new Error();
+    return { provider, address };
+  } catch {
+    throw new ApiError('Connect a wallet first.', 'no_wallet', 0);
+  }
+}
+
 /**
  * x402: calls `path`, and if the service answers 402, asks the browser's own wallet
- * (window.ethereum) to sign an EIP-3009 transferWithAuthorization for exactly what
+ * (the connected wallet) to sign an EIP-3009 transferWithAuthorization for exactly what
  * the 402 response asked for, then retries once with the signed `X-Payment` header.
  * This moves real funds on a real chain once the service has one wired in — it never
  * happens without the wallet's own on-screen approval.
@@ -79,9 +94,7 @@ async function payX402(path, requestBody, fixedHeaders) {
   const required = await res.json();
   const req = required.accepts && required.accepts[0];
   if (!req) throw new ApiError('The service did not say what payment it needs.', 'invalid', 402);
-  if (!window.ethereum) throw new ApiError('No wallet extension found. Install one (e.g. MetaMask) to pay with x402.', 'no_wallet', 0);
-
-  const [from] = await window.ethereum.request({ method: 'eth_requestAccounts' });
+  const { provider, address: from } = await connectedWallet();
   const nowSec = Math.floor(Date.now() / 1000);
   const authorization = {
     from, to: req.payTo, value: req.maxAmountRequired,
@@ -99,7 +112,7 @@ async function payX402(path, requestBody, fixedHeaders) {
     primaryType: 'TransferWithAuthorization',
     message: authorization,
   };
-  const signature = await window.ethereum.request({ method: 'eth_signTypedData_v4', params: [from, JSON.stringify(typedData)] });
+  const signature = await provider.request({ method: 'eth_signTypedData_v4', params: [from, JSON.stringify(typedData)] });
   const payment = { x402Version: 1, scheme: 'exact', network: req.network, payload: { signature, authorization } };
   const paymentHeader = btoa(JSON.stringify(payment));
   let res2;
@@ -211,12 +224,11 @@ const JellyApi = {
     return result;
   },
 
-  /** Signs in with the browser's own connected wallet (window.ethereum): sign-this-message, not a transaction — moves no funds. */
+  /** Signs in with the wallet connected in the dashboard: sign-this-message, not a transaction — moves no funds. */
   async loginWithWallet(chain) {
-    if (!window.ethereum) throw new ApiError('No wallet extension found.', 'no_wallet', 0);
-    const [address] = await window.ethereum.request({ method: 'eth_requestAccounts' });
+    const { provider, address } = await connectedWallet();
     const challenge = await request('/v1/auth/siwe/challenge', { method: 'POST', body: JSON.stringify({ address, chain: chain || 'eip155:8453' }) });
-    const signature = await window.ethereum.request({ method: 'personal_sign', params: [challenge.message, address] });
+    const signature = await provider.request({ method: 'personal_sign', params: [challenge.message, address] });
     const result = await request('/v1/auth/siwe/verify', { method: 'POST', body: JSON.stringify({ address, message: challenge.message, signature, nonce: challenge.nonce }) });
     if (result.sessionId) setAccessKey(result.sessionId);
     return result;

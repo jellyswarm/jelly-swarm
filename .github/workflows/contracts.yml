@@ -1,0 +1,27 @@
+name: Contracts
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    if: github.repository == 'NotADeveloper7/jellyswarm' || github.repository == 'jellyswarm/jelly-swarm'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: Install Solidity dependencies
+        working-directory: contracts
+        run: forge install --no-git foundry-rs/forge-std OpenZeppelin/openzeppelin-contracts@v5.1.0
+      - name: Format check
+        working-directory: contracts
+        run: forge fmt --check src test script
+      - name: Build contracts
+        working-directory: contracts
+        run: forge build
+      - name: Test contracts
+        working-directory: contracts
+        run: forge test

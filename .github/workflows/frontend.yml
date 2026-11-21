@@ -1,0 +1,27 @@
+name: Frontend
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    if: github.repository == 'NotADeveloper7/jellyswarm' || github.repository == 'jellyswarm/jelly-swarm'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: bun test
+      - run: pnpm typecheck
+      - run: pnpm lint:copy
+      - run: pnpm --filter jellyswarm-website build
+      - name: Build production web image
+        run: docker build --tag jellyswarm-web:ci -f apps/web/Dockerfile apps/web

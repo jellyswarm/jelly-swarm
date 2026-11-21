@@ -27,7 +27,9 @@ contract JellyJob is IJellyJob, ReentrancyGuard {
     uint256 public jobCount;
     mapping(uint256 => Job) private _jobs;
 
-    event JobCreated(uint256 indexed jobId, address indexed client, address provider, address evaluator, uint64 expiredAt);
+    event JobCreated(
+        uint256 indexed jobId, address indexed client, address provider, address evaluator, uint64 expiredAt
+    );
     event BudgetSet(uint256 indexed jobId, uint256 amount);
     event JobFunded(uint256 indexed jobId, address indexed client, address refundTo, uint256 amount);
     event JobSubmitted(uint256 indexed jobId, bytes32 deliverable);

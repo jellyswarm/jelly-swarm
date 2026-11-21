@@ -115,8 +115,7 @@ contract OperatorRegistry is IOperatorRegistry {
         if (payout == address(0)) revert ZeroAddress();
         if (route == Route.STUDIO) revert NotAllowed();
         if (usdcStake < minUsdcStake || tokenStake < minTokenStake) revert LowStake();
-        _ops[operatorId] =
-            Operator(msg.sender, payout, endpointHash, route, Status.Active, 0, 0, usdcStake, tokenStake);
+        _ops[operatorId] = Operator(msg.sender, payout, endpointHash, route, Status.Active, 0, 0, usdcStake, tokenStake);
         if (usdcStake != 0) usdc.safeTransferFrom(msg.sender, address(this), usdcStake);
         if (tokenStake != 0) productToken.safeTransferFrom(msg.sender, address(this), tokenStake);
         emit Registered(operatorId, msg.sender, payout, route);

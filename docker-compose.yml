@@ -56,12 +56,18 @@ services:
 
   web:
     build:
-      context: .
-      dockerfile: apps/web/Dockerfile
+      context: apps/web
+      dockerfile: Dockerfile
     environment:
       PORT: "4173"
+      API_URL: http://api:3000
+    env_file:
+      - .env
     ports:
       - "4173:4173"
+    depends_on:
+      api:
+        condition: service_started
     profiles: ["app"]
 
 volumes:

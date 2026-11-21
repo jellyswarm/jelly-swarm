@@ -1,4 +1,5 @@
 import { trpcServer } from "@hono/trpc-server";
+import { timingSafeEqual } from "node:crypto";
 import { type AsnLookup, type BanStore, type ProofOfWork, type WindowCounter, checkAndConsume, checkFreeTierPolicy, onJobRejected } from "@jelly/abuse";
 import { AuthError, type AuthService } from "@jelly/auth";
 import type { WatchStore } from "@jelly/db";
@@ -36,6 +37,8 @@ export type AppDeps = {
   nonces: NonceStore;
   /** Public base URL, used in payment requirements and the agent card. */
   publicUrl: string;
+  /** Shared service gate. The browser-facing proxy adds this server-side; never expose it to clients. */
+  masterApiKey?: string;
   onError?: (e: unknown) => void;
   /** Powers GET /stats and /stats.json (§"A public meter for real paid volume"). Omit to serve neither. */
   stats?: {
@@ -145,6 +148,19 @@ export function createApp(deps: AppDeps) {
   if (deps.corsOrigins?.length) {
     app.use("*", cors({ origin: [...deps.corsOrigins], allowHeaders: ["content-type", "authorization", "x-payment", "x-jelly-payer"], exposeHeaders: ["x-payment-response"] }));
   }
+
+  // Liveness is intentionally public; every other route requires the server-to-server key.
+  // OPTIONS remains open for browser CORS preflight.
+  app.get("/health", (c) => c.json({ status: "ok" }));
+  app.use("*", async (c, next) => {
+    if (c.req.method === "OPTIONS" || c.req.path === "/health") return next();
+    const providedBytes = Buffer.from(c.req.header("x-master-api-key") ?? "");
+    const expectedBytes = Buffer.from(deps.masterApiKey ?? "");
+    if (!expectedBytes.length || providedBytes.length !== expectedBytes.length || !timingSafeEqual(providedBytes, expectedBytes)) {
+      return c.json({ error: "unauthorized", message: "A valid service API key is required." }, 401);
+    }
+    return next();
+  });
 
   app.onError((e, c) => {
     if (e instanceof ServiceError) return c.json({ error: e.code, message: e.message }, STATUS[e.code]);

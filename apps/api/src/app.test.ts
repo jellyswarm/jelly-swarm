@@ -19,6 +19,7 @@ function makeTestApp(over: Parameters<typeof makeService>[0] = {}, withStats = f
     store: s.store,
     nonces: new MemoryNonceStore(),
     publicUrl: "https://api.jellyswarm.test",
+    masterApiKey: "local-test-master-api-key-1234567890",
     facilitator: {
       verify: async () => (verifyOk ? { isValid: true, payer: WALLET } : { isValid: false, invalidReason: "invalid_signature" }),
       // A real facilitator's settle() submits the transfer on-chain, so the forwarder's real
@@ -46,7 +47,7 @@ const req = (app: ReturnType<typeof makeTestApp>["app"], path: string, init: Req
   const { json: body, headers, ...rest } = init;
   return app.request(path, {
     ...rest,
-    headers: { ...(headers as Record<string, string>), ...(body !== undefined ? { "content-type": "application/json" } : {}) },
+    headers: { "x-master-api-key": "local-test-master-api-key-1234567890", ...(headers as Record<string, string>), ...(body !== undefined ? { "content-type": "application/json" } : {}) },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
 };

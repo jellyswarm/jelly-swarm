@@ -89,8 +89,9 @@ contract Deploy is Script {
         BurnBucket burnBucket = new BurnBucket(usd, deployer, classifier, keeper, treasury);
         FeeRouter feeRouter = new FeeRouter(usd, deployer, address(payouts), burnBucket, treasury, checkerPool);
         burnBucket.setFeeRouter(address(feeRouter));
-        RowSplit split =
-            new RowSplit(job, receiptRoot, bond, feeRouter, IHaltSwitch(address(halt)), deployer, quoter, keeper, treasury);
+        RowSplit split = new RowSplit(
+            job, receiptRoot, bond, feeRouter, IHaltSwitch(address(halt)), deployer, quoter, keeper, treasury
+        );
         CheckerNet net = new CheckerNet(productToken, split, deployer, 1e18);
         split.setCheckerNet(ICheckerNet(address(net)));
         bond.setRowSplit(address(split));

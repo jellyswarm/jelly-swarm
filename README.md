@@ -46,8 +46,8 @@ comments point there.
 Needs Bun 1.4+, pnpm 10, Node 22 and Docker.
 
 ### Environment & Database Setup
-Set `DATABASE_URL` and `REDIS_URL` manually in your local `.env` file (copied from `.env.example`).
-No automated CI workflow is used in this repository; all database and Redis connection URLs are configured directly by the developer.
+Copy `.env.example` to `.env`, set `MASTER_API_KEY` to a long random value, then set `DATABASE_URL` and `REDIS_URL`. Use the same master key in the API and trusted web proxy; do not put it in browser code. The API-specific variables are listed in `apps/api/.env.example`.
+GitHub Actions runs frontend, backend, and contract checks in the private deployment repository and the public mirror. The backend image publish and Render deploy hook run only from `NotADeveloper7/jellyswarm` on `main`.
 
 ```bash
 pnpm install
@@ -66,6 +66,14 @@ pnpm contracts:test
 
 After changing `packages/db/src/schema.ts`, run `pnpm db:generate` and commit
 the new migration.
+
+## Deployment
+
+The Bun web server serves the static site and proxies `/api/*` to `API_URL`, adding `MASTER_API_KEY` on the server side. Deploy `apps/web` to Vercel with **Root Directory** `apps/web` and **Framework Preset** `Container`; set `API_URL` and `MASTER_API_KEY` as server environment variables for Preview and Production. Its Dockerfile is scoped to that directory, which is also the Vercel build context.
+
+Deploy the API as a persistent container service (for example, Render), with `DATABASE_URL`, `REDIS_URL`, `MASTER_API_KEY`, `SIGNER_PRIVATE_KEY`, `OPEN_ROUTER_API_KEY` (or `MODEL_HOST_API_KEY`), and the selected chain RPC and escrow addresses. Configure the public API URL and web origin variables as well. The API rejects startup without a 32-character `MASTER_API_KEY`; `GET /health` is the sole public endpoint. Keep the web proxy and API keys identical.
+
+GitHub Actions checks run in `NotADeveloper7/jellyswarm` and `jellyswarm/jelly-swarm`. Only pushes to `main` in the private deployment repository publish the API image and trigger `RENDER_DEPLOY_HOOK_URL` when configured. Add that secret in the private repository's Actions settings.
 
 ## Rules that tests enforce
 

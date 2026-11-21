@@ -43,6 +43,10 @@ import { defaultModelHost } from "./model-hosts";
 export async function buildApp() {
   const env = loadInfraEnv();
   const warnings: string[] = [];
+  const masterApiKey = process.env.MASTER_API_KEY;
+  if (!masterApiKey || masterApiKey.length < 32) {
+    throw new Error("MASTER_API_KEY must be set to a random value of at least 32 characters");
+  }
 
   // ── infra ──
   const { db } = createDb(env.DATABASE_URL);
@@ -213,6 +217,7 @@ export async function buildApp() {
     facilitator,
     nonces,
     publicUrl: process.env.PUBLIC_URL ?? "http://localhost:3000",
+    masterApiKey,
     onError: (e) => logger.error({ err: e }, "internal error"),
     stats: { store, studioOperated: true },
     corsOrigins: (process.env.CORS_ORIGINS ?? "http://localhost:4173,http://127.0.0.1:4173").split(",").map((s) => s.trim()).filter(Boolean),

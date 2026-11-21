@@ -40,6 +40,7 @@ async function proxyToApi(req: Request, url: URL, clientIp: string | undefined):
   }
   headers.set("x-forwarded-host", url.host);
   headers.set("x-forwarded-proto", url.protocol.replace(":", ""));
+  if (process.env.MASTER_API_KEY) headers.set("x-master-api-key", process.env.MASTER_API_KEY);
   const hasBody = req.method !== "GET" && req.method !== "HEAD";
   let upstream: Response;
   try {

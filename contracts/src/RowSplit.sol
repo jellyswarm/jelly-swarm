@@ -212,18 +212,23 @@ contract RowSplit is IRowSplit, IJobHook, EIP712, ReentrancyGuard {
         return uint256(r.baseUsd6) + uint256(r.rowCount) * r.unitUsd6 + r.toolsCapUsd6;
     }
 
-    function rowLeaf(bytes32 jobKey, uint32 rowIdx, bool passed, uint64 operatorId, uint64 unitUsd6, bytes32 receiptsHash)
-        public
-        pure
-        returns (bytes32)
-    {
+    function rowLeaf(
+        bytes32 jobKey,
+        uint32 rowIdx,
+        bool passed,
+        uint64 operatorId,
+        uint64 unitUsd6,
+        bytes32 receiptsHash
+    ) public pure returns (bytes32) {
         return keccak256(abi.encode(jobKey, rowIdx, passed, operatorId, unitUsd6, receiptsHash));
     }
 
     function verdictDigest(Verdict calldata v) public view returns (bytes32) {
         return _hashTypedDataV4(
             keccak256(
-                abi.encode(VERDICT_TYPEHASH, v.jobKey, v.rowCount, v.passedCount, v.rowsRoot, v.receiptsRoot, v.toolsUsd6)
+                abi.encode(
+                    VERDICT_TYPEHASH, v.jobKey, v.rowCount, v.passedCount, v.rowsRoot, v.receiptsRoot, v.toolsUsd6
+                )
             )
         );
     }
@@ -324,7 +329,9 @@ contract RowSplit is IRowSplit, IJobHook, EIP712, ReentrancyGuard {
     /// passed row, and reserves the rows for one round.
     function _challenge(uint256 jobId, RowProofs calldata p) private {
         uint256 n = p.rowIdx.length;
-        if (n == 0 || p.operatorIds.length != n || p.receiptsHashes.length != n || p.proofs.length != n) revert BadRows();
+        if (n == 0 || p.operatorIds.length != n || p.receiptsHashes.length != n || p.proofs.length != n) {
+            revert BadRows();
+        }
         State storage s = _state[jobId];
         if (!s.settled || s.finalized) revert BadState();
         if (block.timestamp >= s.releaseAt) revert WindowClosed();
@@ -362,7 +369,9 @@ contract RowSplit is IRowSplit, IJobHook, EIP712, ReentrancyGuard {
         if (msg.sender != address(checkerNet)) revert NotAllowed();
         Round storage round = rounds[roundId];
         State storage s = _state[jobId];
-        if (round.jobId != jobId || round.closed || s.finalized || rowIdx.length != refundBps.length) revert BadState();
+        if (round.jobId != jobId || round.closed || s.finalized || rowIdx.length != refundBps.length) {
+            revert BadState();
+        }
         round.closed = true;
         s.openRounds -= 1;
 

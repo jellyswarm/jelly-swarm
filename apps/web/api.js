@@ -125,7 +125,7 @@ const JellyApi = {
 
   /** True if the service answers at all; used for the "connected" indicator, not as an auth check. */
   async health() {
-    try { await request('/stats'); return true; } catch { return false; }
+    try { const res = await fetch('/api/health'); return res.ok; } catch { return false; }
   },
   /** Public volume/refund/burn meter — no auth, same data anyone sees at GET /stats. */
   stats(days) { return request(`/stats${days ? `?days=${days}` : ''}`); },

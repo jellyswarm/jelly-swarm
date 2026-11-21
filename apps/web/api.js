@@ -10,17 +10,33 @@ function apiUrl() { return '/api'; }
 // An absolute API URL saved by an older build would bypass the proxy and bring CORS back.
 try { localStorage.removeItem(API_URL_KEY); } catch {}
 function setApiUrl() {}
-function accessKey() { try { return localStorage.getItem(ACCESS_KEY_KEY) || ''; } catch { return ''; } }
-function setAccessKey(key) { try { localStorage.setItem(ACCESS_KEY_KEY, key); } catch {} }
+
+/**
+ * The account credential (anonymous access key or sign-in session id) is held server-side in an
+ * httpOnly cookie that serve.ts sets and attaches to its own API call. This script never sees it.
+ * These stay as no-ops so older callers keep working.
+ */
+function accessKey() { return ''; }
+function setAccessKey() {}
+
+/** One-time move of a key an older build kept in localStorage into the server-side cookie. */
+const credentialReady = (async () => {
+  let legacy = '';
+  try { legacy = localStorage.getItem(ACCESS_KEY_KEY) || ''; } catch {}
+  if (!legacy) return;
+  try {
+    const res = await fetch('/api/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: legacy }) });
+    if (res.ok) { try { localStorage.removeItem(ACCESS_KEY_KEY); } catch {} }
+  } catch { /* keep it for the next load */ }
+})();
 
 class ApiError extends Error {
   constructor(message, code, status) { super(message); this.code = code; this.status = status; }
 }
 
 async function request(path, opts = {}) {
+  await credentialReady;
   const headers = { 'content-type': 'application/json', ...(opts.headers || {}) };
-  const key = accessKey();
-  if (key && !headers.authorization) headers.authorization = `Bearer ${key}`;
   let res;
   try {
     res = await fetch(apiUrl() + path, { ...opts, headers });
@@ -77,9 +93,8 @@ async function connectedWallet() {
  * happens without the wallet's own on-screen approval.
  */
 async function payX402(path, requestBody, fixedHeaders) {
-  const key = accessKey();
+  await credentialReady;
   const headers = { 'content-type': 'application/json', ...(fixedHeaders || {}) };
-  if (key) headers.authorization = `Bearer ${key}`;
   const send = (extraHeaders) => fetch(apiUrl() + path, { method: 'POST', headers: { ...headers, ...extraHeaders }, body: JSON.stringify(requestBody) });
   const parse = async (res) => {
     const text = await res.text();
@@ -143,7 +158,6 @@ const JellyApi = {
   /** Picket watch: saved for real on the service, but nothing monitors it yet — there is no watch engine. */
   async createWatch(target, condition) {
     const result = await request('/v1/watches', { method: 'POST', body: JSON.stringify({ target, condition }) });
-    if (result.accessKey) setAccessKey(result.accessKey);
     return result.watch;
   },
   listWatches() { return request('/v1/watches').then((r) => r.watches); },
@@ -160,7 +174,6 @@ const JellyApi = {
   referralCode() { return request('/v1/account/referral-code').then((r) => r.code); },
   async registerReferral(refCode) {
     const result = await request('/v1/account/referrals', { method: 'POST', body: JSON.stringify({ refCode }) });
-    if (result.accessKey) setAccessKey(result.accessKey);
     return result;
   },
   creditBalance() { return request('/v1/account/credits').then((r) => r.balanceUsd); },
@@ -201,7 +214,6 @@ const JellyApi = {
       clientExtensionResults: cred.getClientExtensionResults ? cred.getClientExtensionResults() : {},
     };
     const result = await request('/v1/auth/passkey/register/complete', { method: 'POST', body: JSON.stringify({ challenge, response }) });
-    if (result.sessionId) setAccessKey(result.sessionId);
     return result;
   },
   async loginPasskey() {
@@ -220,7 +232,6 @@ const JellyApi = {
       },
     };
     const result = await request('/v1/auth/passkey/login/complete', { method: 'POST', body: JSON.stringify({ challenge, credentialId: cred.id, response }) });
-    if (result.sessionId) setAccessKey(result.sessionId);
     return result;
   },
 
@@ -230,7 +241,6 @@ const JellyApi = {
     const challenge = await request('/v1/auth/siwe/challenge', { method: 'POST', body: JSON.stringify({ address, chain: chain || 'eip155:8453' }) });
     const signature = await provider.request({ method: 'personal_sign', params: [challenge.message, address] });
     const result = await request('/v1/auth/siwe/verify', { method: 'POST', body: JSON.stringify({ address, message: challenge.message, signature, nonce: challenge.nonce }) });
-    if (result.sessionId) setAccessKey(result.sessionId);
     return result;
   },
 
@@ -238,14 +248,17 @@ const JellyApi = {
   requestEmailLink(email) { return request('/v1/auth/email/request', { method: 'POST', body: JSON.stringify({ email }) }); },
   async verifyEmailLink(token) {
     const result = await request('/v1/auth/email/verify', { method: 'POST', body: JSON.stringify({ token }) });
-    if (result.sessionId) setAccessKey(result.sessionId);
     return result;
   },
 
-  /** Live progress via SSE, with Last-Event-ID resume built in by the browser's EventSource. EventSource can't set headers, so the key travels as a query param. */
+  /** Signs this browser out: serve.ts clears the credential cookie. */
+  async signOut() { await credentialReady; await fetch('/api/session', { method: 'DELETE' }); },
+  /** Whether this browser holds a credential (the credential itself stays server-side). */
+  async hasSession() { try { const res = await fetch('/api/session'); return res.ok && (await res.json()).active; } catch { return false; } },
+
+  /** Live progress via SSE, with Last-Event-ID resume built in by the browser's EventSource. Same-origin, so the credential cookie rides along. */
   subscribe(jobKey, onEvent) {
-    const key = accessKey();
-    const es = new EventSource(`${apiUrl()}/v1/jobs/${jobKey}/events${key ? `?key=${encodeURIComponent(key)}` : ''}`);
+    const es = new EventSource(`${apiUrl()}/v1/jobs/${jobKey}/events`);
     const types = ['eta', 'cost', 'job.quoted', 'job.funded', 'job.merged', 'job.sealed', 'job.settled', 'job.failed', 'tile', 'tiles.batch', 'wave.started'];
     for (const type of types) es.addEventListener(type, (e) => onEvent(type, e.data ? JSON.parse(e.data) : null));
     return () => es.close();

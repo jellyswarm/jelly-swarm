@@ -217,7 +217,6 @@ function render(id) {
           task, items, tier, maxAgents,
           columns: columns.map((name) => ({ name, type: 'text', needsSource: true })),
         });
-        if (quote.accessKey) JellyApi.setAccessKey(quote.accessKey);
         pendingJob = { task, items, columns, tier, maxAgents, quoteId: quote.quoteId, quote };
         drawer.querySelector('#estimate').textContent = `$${quote.priceUsd} fixed price for ${quote.agents} of ${quote.of} agents. Expires ${new Date(quote.expiresAt).toLocaleString()}.`;
         feedback(drawer, '');
@@ -368,7 +367,7 @@ function render(id) {
       out.textContent = 'Asking your wallet to sign the payment…';
       try {
         const result = await JellyApi.topUpKey(owner, amountUsd);
-        out.innerHTML = `<p>Key issued: <code>${escapeHtml(result.keyId)}</code>. ${escapeHtml(result.note || '')}</p>`;
+        out.innerHTML = `<p>Key issued: <code>${escapeHtml(result.keyId)}</code>.</p>${result.key ? `<p>API key (shown once, copy it now): <code>${escapeHtml(result.key)}</code></p>` : ''}<p>${escapeHtml(result.note || '')}</p>`;
       } catch (e) {
         out.textContent = errorMessage(e);
       }

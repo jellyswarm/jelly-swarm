@@ -12,6 +12,8 @@ const shares = new Set([5_000, 7_000, 10_000]);
 const settlementTypes = {
   SettlementDecision: [
     { name: "jobId", type: "bytes32" },
+    { name: "client", type: "address" },
+    { name: "amount", type: "uint256" },
     { name: "clientShareBps", type: "uint16" },
     { name: "nonce", type: "uint256" },
     { name: "deadline", type: "uint256" },
@@ -98,10 +100,16 @@ jobsRouter.post("/:id/payment", async (req, res) => {
     client_address: string;
     amount_base_units: string;
     status: string;
-  }>("SELECT client_address, amount_base_units, status FROM jobs WHERE id = $1", [id.toLowerCase()]);
+    payment_tx_hash: string | null;
+  }>("SELECT client_address, amount_base_units, status, payment_tx_hash FROM jobs WHERE id = $1", [id.toLowerCase()]);
   const job = found.rows[0];
   if (!job) return res.status(404).json({ error: "job_not_found" });
-  if (job.status !== "payment_pending") return res.status(409).json({ error: "job_not_awaiting_payment", status: job.status });
+  if (job.status !== "payment_pending") {
+    if (job.payment_tx_hash?.toLowerCase() === txHash.toLowerCase()) {
+      return res.status(202).json({ jobId: `0x${id}`, status: job.status });
+    }
+    return res.status(409).json({ error: "job_not_awaiting_payment", status: job.status });
+  }
 
   try {
     const valid = await verifyFundingReceipt({
@@ -167,7 +175,10 @@ jobsRouter.get("/:id/settlement/typed-data", async (req, res) => {
   if (deadline <= Math.floor(Date.now() / 1000)) return res.status(400).json({ error: "settlement_decision_expired" });
   const payment = paymentConfiguration(res);
   if (!payment) return;
-  const result = await pool.query<{ status: string }>("SELECT status FROM jobs WHERE id = $1", [id.toLowerCase()]);
+  const result = await pool.query<{ status: string; client_address: string; amount_base_units: string }>(
+    "SELECT status, client_address, amount_base_units FROM jobs WHERE id = $1",
+    [id.toLowerCase()],
+  );
   if (!result.rows[0]) return res.status(404).json({ error: "job_not_found" });
   if (result.rows[0].status !== "failed" && result.rows[0].status !== "settlement_pending") {
     return res.status(409).json({ error: "job_not_ready_for_settlement" });
@@ -177,7 +188,14 @@ jobsRouter.get("/:id/settlement/typed-data", async (req, res) => {
     domain: { name: "JellySwarmEscrowWallet", version: "1", chainId: chain.id, verifyingContract: payment.escrow },
     types: settlementTypes,
     primaryType: "SettlementDecision",
-    message: { jobId: `0x${id}`, clientShareBps, nonce: "0", deadline: String(deadline) },
+    message: {
+      jobId: `0x${id}`,
+      client: result.rows[0].client_address,
+      amount: result.rows[0].amount_base_units,
+      clientShareBps,
+      nonce: "0",
+      deadline: String(deadline),
+    },
   });
 });
 
@@ -196,7 +214,10 @@ jobsRouter.post("/:id/settlement", async (req, res) => {
   const treasury = process.env.TREASURY_PUBLIC_KEY;
   if (!treasury || !/^0x[\da-fA-F]{40}$/.test(treasury)) return res.status(503).json({ error: "treasury_signer_not_configured" });
 
-  const result = await pool.query<{ status: string }>("SELECT status FROM jobs WHERE id = $1", [id.toLowerCase()]);
+  const result = await pool.query<{ status: string; client_address: string; amount_base_units: string }>(
+    "SELECT status, client_address, amount_base_units FROM jobs WHERE id = $1",
+    [id.toLowerCase()],
+  );
   const job = result.rows[0];
   if (!job) return res.status(404).json({ error: "job_not_found" });
   if (job.status !== "failed" && job.status !== "settlement_pending") return res.status(409).json({ error: "job_not_ready_for_refund_decision" });
@@ -211,7 +232,14 @@ jobsRouter.post("/:id/settlement", async (req, res) => {
       domain: { name: "JellySwarmEscrowWallet", version: "1", chainId: chain.id, verifyingContract: payment.escrow },
       types: settlementTypes,
       primaryType: "SettlementDecision",
-      message: { jobId: `0x${id}`, clientShareBps, nonce: 0n, deadline: BigInt(deadline) },
+      message: {
+        jobId: `0x${id}`,
+        client: result.rows[0].client_address as `0x${string}`,
+        amount: BigInt(result.rows[0].amount_base_units),
+        clientShareBps,
+        nonce: 0n,
+        deadline: BigInt(deadline),
+      },
       signature: signature as Hash,
     });
   } catch {

@@ -8,6 +8,7 @@ describe("GET /health", () => {
     expect(response.status).toBe(200);
     expect(response.body.status).toBe("ok");
     expect(response.body.version).toBe("0.1.0");
+    expect(response.body.buildSha).toBe(process.env.APP_COMMIT_SHA ?? "unknown");
     expect(Number.isNaN(Date.parse(response.body.timestamp))).toBe(false);
   });
 });

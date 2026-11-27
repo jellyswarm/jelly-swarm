@@ -1,30 +1,22 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { createPublicClient, createWalletClient, custom, defineChain, formatUnits, http, parseAbi } from "viem";
+import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
 
 const ELYSIUM_ID = 99901;
 const USDC = "0xb47c4C8F73F009CC0C0d3f92B388d13E293F0B65";
-const elysium = defineChain({
-  id: ELYSIUM_ID,
-  name: "Elysium",
-  nativeCurrency: { decimals: 18, name: "HYPE", symbol: "HYPE" },
-  rpcUrls: { default: { http: ["https://rpc.elysium.kinetiq.xyz"] } },
-  blockExplorers: { default: { name: "Elysium Explorer", url: "https://elysium.kinetiq.xyz/explorer" } },
-});
-const erc20Abi = parseAbi(["function transfer(address to, uint256 amount) returns (bool)"]);
-const publicClient = createPublicClient({ chain: elysium, transport: http() });
-
-async function ensureWallet(walletClient) {
-  if (!walletClient || !window.ethereum) throw new Error("Install an EVM wallet to continue.");
-  const [address] = await walletClient.requestAddresses();
-  const chainId = await walletClient.getChainId();
+async function ensureWallet() {
+  const provider = window.ethereum;
+  if (!provider) throw new Error("Install an EVM wallet to continue.");
+  const accounts = await provider.request({ method: "eth_requestAccounts" });
+  const address = accounts?.[0];
+  if (!address) throw new Error("No wallet account is available.");
+  const chainId = Number.parseInt(await provider.request({ method: "eth_chainId" }), 16);
   if (chainId !== ELYSIUM_ID) {
     try {
-      await walletClient.switchChain({ id: ELYSIUM_ID });
+      await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: `0x${ELYSIUM_ID.toString(16)}` }] });
     } catch (error) {
       if (error?.code !== 4902 && error?.cause?.code !== 4902) throw error;
-      await window.ethereum.request({
+      await provider.request({
         method: "wallet_addEthereumChain",
         params: [{
           chainId: `0x${ELYSIUM_ID.toString(16)}`,
@@ -34,10 +26,24 @@ async function ensureWallet(walletClient) {
           blockExplorerUrls: ["https://elysium.kinetiq.xyz/explorer"],
         }],
       });
-      await walletClient.switchChain({ id: ELYSIUM_ID });
+      await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: `0x${ELYSIUM_ID.toString(16)}` }] });
     }
   }
-  return address;
+  return { address, provider };
+}
+
+function encodeUsdcTransfer(to, amount) {
+  const address = to.toLowerCase().replace(/^0x/, "");
+  const value = BigInt(amount).toString(16);
+  if (!/^[0-9a-f]{40}$/.test(address) || value.length > 64) throw new Error("Invalid USDC payment details.");
+  return `0xa9059cbb${address.padStart(64, "0")}${value.padStart(64, "0")}`;
+}
+
+function formatUsdc(amount) {
+  const value = BigInt(amount);
+  const whole = value / 1_000_000n;
+  const fraction = (value % 1_000_000n).toString().padStart(6, "0").replace(/0+$/, "");
+  return fraction ? `${whole}.${fraction}` : String(whole);
 }
 
 async function api(path, options = {}) {
@@ -56,15 +62,11 @@ function App() {
   const [paymentMode, setPaymentMode] = useState("x402");
   const [account, setAccount] = useState("");
   const [quote, setQuote] = useState(null);
+  const [fundingTxHash, setFundingTxHash] = useState("");
   const [jobId, setJobId] = useState("");
   const [job, setJob] = useState(null);
   const [phase, setPhase] = useState("idle");
   const [error, setError] = useState("");
-
-  const walletClient = useMemo(() => {
-    if (!window.ethereum) return null;
-    return createWalletClient({ chain: elysium, transport: custom(window.ethereum) });
-  }, []);
 
   useEffect(() => {
     if (!jobId || !["queued", "running", "payout_pending"].includes(job?.status)) return;
@@ -89,7 +91,7 @@ function App() {
   }, [job?.status]);
 
   async function connectWallet() {
-    const address = await ensureWallet(walletClient);
+    const { address } = await ensureWallet();
     setAccount(address);
     return address;
   }
@@ -100,9 +102,10 @@ function App() {
     setJob(null);
     setJobId("");
     setQuote(null);
+    setFundingTxHash("");
     try {
       setPhase("connecting");
-      const address = await ensureWallet(walletClient);
+      const { address } = await ensureWallet();
       setAccount(address);
 
       setPhase("quoting");
@@ -121,24 +124,39 @@ function App() {
   }
 
   async function confirmPayment() {
-    if (!quote || !walletClient) return;
+    if (!quote) return;
     setError("");
     try {
-      const address = await ensureWallet(walletClient);
+      const { address, provider } = await ensureWallet();
       if (address.toLowerCase() !== quote.payment.accepts[0].extra.clientAddress.toLowerCase()) {
         throw new Error("Reconnect the wallet used to create this quote.");
       }
       const payment = quote.payment.accepts[0];
       setPhase("funding");
-      const fundHash = await walletClient.writeContract({
-        account: address,
-        address: USDC,
-        abi: erc20Abi,
-        functionName: "transfer",
-        args: [quote.fundCall.args[0], BigInt(quote.fundCall.args[1])],
-      });
-      const fundingReceipt = await publicClient.waitForTransactionReceipt({ hash: fundHash });
-      if (fundingReceipt.status !== "success") throw new Error("Escrow funding failed.");
+      let fundHash = fundingTxHash;
+      if (!fundHash) {
+        fundHash = await provider.request({
+          method: "eth_sendTransaction",
+          params: [{
+            from: address,
+            to: USDC,
+            data: encodeUsdcTransfer(quote.fundCall.args[0], quote.fundCall.args[1]),
+            value: "0x0",
+          }],
+        });
+        setFundingTxHash(fundHash);
+      }
+      let fundingReceipt;
+      for (let attempt = 0; attempt < 60; attempt++) {
+        fundingReceipt = await provider.request({ method: "eth_getTransactionReceipt", params: [fundHash] });
+        if (fundingReceipt) break;
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+      }
+      if (!fundingReceipt) throw new Error("Payment transaction is still pending. Check this job again shortly.");
+      if (fundingReceipt.status !== "0x1") {
+        setFundingTxHash("");
+        throw new Error("Escrow funding failed.");
+      }
 
       setPhase("confirming");
       let confirmed = false;
@@ -230,7 +248,7 @@ function App() {
         {jobId && <div className="job-state-head"><div><p className="eyebrow"><span>03</span> JOB STATUS</p><h2>{statusLabel(status)}</h2></div><span className={`state-pill state-${status}`}>{status.replaceAll("_", " ")}</span></div>}
         {jobId && <p className="job-reference">JOB <code>{jobId}</code></p>}
         {quote && phase === "quoted" && <div className="quote-panel">
-          <div><span>UPFRONT TOTAL</span><strong>{formatUnits(BigInt(quote.payment.accepts[0].amount), 6)} USDC</strong><small>{quote.agentCount} agents; synthesis included</small></div>
+          <div><span>UPFRONT TOTAL</span><strong>{formatUsdc(quote.payment.accepts[0].amount)} USDC</strong><small>{quote.agentCount} agents; synthesis included</small></div>
           <div className="quote-actions"><button className="submit-button" onClick={confirmPayment} disabled={busy}>{busy ? <><span className="spinner" /> {phaseLabel(phase)}</> : <>Approve &amp; fund <span aria-hidden="true">↗</span></>}</button></div>
         </div>}
         {job?.status === "running" && <div className="running-line"><span /><span /><span /><span /><span /><small>{job.agentCount ?? agentCount} agents are working</small></div>}

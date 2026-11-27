@@ -19,6 +19,7 @@ coverage/
 
 # Legacy repository outputs
 legacy/**/technical-docs/
+legacy/docs/
 legacy/**/.tsbuild/
 legacy/**/*.tsbuildinfo
 legacy/**/CLAUDE.md

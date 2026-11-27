@@ -2,14 +2,16 @@ import { createConfig, http } from "wagmi";
 import { defineChain } from "viem";
 import { connectorsForWallets, darkTheme } from "@rainbow-me/rainbowkit";
 import {
+  braveWallet,
   coinbaseWallet,
-  injectedWallet,
   metaMaskWallet,
   okxWallet,
+  phantomWallet,
   rabbyWallet,
   rainbowWallet,
   trustWallet,
   walletConnectWallet,
+  zerionWallet,
 } from "@rainbow-me/rainbowkit/wallets";
 
 export const USDC = "0xb47c4C8F73F009CC0C0d3f92B388d13E293F0B65";
@@ -23,20 +25,30 @@ export const elysium = defineChain({
   blockExplorers: { default: { name: "Elysium Explorer", url: EXPLORER } },
 });
 
-// A WalletConnect (Reown) project ID unlocks mobile and QR wallets. It is public, not a secret.
-// Without one, browser-extension wallets still work.
+// Every installed extension that announces itself (EIP-6963: MetaMask, Rabby, Rainbow, Phantom, OKX, …)
+// is listed under "Installed" with its own name and its own provider, so picking one never falls
+// through to whichever extension grabbed window.ethereum. There is deliberately no generic
+// "Browser Wallet" entry: that one always opens the extension that owns window.ethereum.
+//
+// A WalletConnect (Reown) project ID adds mobile and QR-code wallets. It is public, not a secret.
+// Without one, installed browser wallets still work.
 const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || "";
-const groups = projectId
-  ? [
-      { groupName: "Popular", wallets: [metaMaskWallet, rabbyWallet, coinbaseWallet, rainbowWallet] },
-      { groupName: "More", wallets: [okxWallet, trustWallet, walletConnectWallet, injectedWallet] },
-    ]
-  : [{ groupName: "Browser wallets", wallets: [injectedWallet, rabbyWallet, coinbaseWallet] }];
+const groups = [
+  {
+    groupName: "Popular",
+    wallets: [metaMaskWallet, rabbyWallet, rainbowWallet, coinbaseWallet, phantomWallet],
+  },
+  {
+    groupName: "More",
+    wallets: [okxWallet, trustWallet, zerionWallet, braveWallet, ...(projectId ? [walletConnectWallet] : [])],
+  },
+];
 
 export const config = createConfig({
   connectors: connectorsForWallets(groups, { appName: "JellySwarm", projectId: projectId || "browser-only" }),
   chains: [elysium],
   transports: { [elysium.id]: http() },
+  multiInjectedProviderDiscovery: true,
   ssr: false,
 });
 

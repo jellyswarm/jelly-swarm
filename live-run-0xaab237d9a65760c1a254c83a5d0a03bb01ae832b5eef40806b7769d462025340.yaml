@@ -1,0 +1,113 @@
+run:
+  date: 2026-11-27
+  status: completed
+  environment: production
+  api_base_url: https://api.jellyswarm.app
+  deployed_public_build_sha: 57c447cda49cc87e26e63c6a9edb9092bfe5bf7d
+
+goal: >-
+  Verify a real one-agent JellySwarm job from x402 quote through Elysium USDC
+  deposit, payment verification, agent execution, and treasury settlement.
+
+configuration:
+  chain: Elysium
+  chain_id: 99901
+  asset: USDC
+  usdc_contract: "0xb47c4C8F73F009CC0C0d3f92B388d13E293F0B65"
+  price_per_agent_usdc: "0.30"
+  agent_count: 1
+  payment_mode: x402
+  client_wallet: "0xB64e1dB47748784E9D3fE125aa09D4Edb6163653"
+  escrow_wallet: "0x9392cc8C422B1e29C1648e0B535c4670B822FabD"
+
+job:
+  id: "0x1e226bf3a6f60695eb50bfb08e810cdca3acae92e0a4cec411f7138504a306f4"
+  task: "Reply with exactly: JellySwarm end-to-end test completed."
+  final_status: settled
+  agent_status: completed
+  agent_output: "JellySwarm end-to-end test completed."
+
+transactions:
+  escrow_gas_top_up:
+    asset: HYPE
+    amount: "0.001"
+    from: "0xB64e1dB47748784E9D3fE125aa09D4Edb6163653"
+    to: "0x9392cc8C422B1e29C1648e0B535c4670B822FabD"
+    hash: "0xd983b4e90fa1810ece6c5fd0e1c11eae40c512d69e2b7b4337edfd5cfd025be8"
+    receipt_status: success
+  deposit:
+    asset: USDC
+    amount: "0.30"
+    amount_base_units: "300000"
+    from: "0xB64e1dB47748784E9D3fE125aa09D4Edb6163653"
+    to: "0x9392cc8C422B1e29C1648e0B535c4670B822FabD"
+    hash: "0xaab237d9a65760c1a254c83a5d0a03bb01ae832b5eef40806b7769d462025340"
+    receipt_status: success
+  treasury_payout:
+    asset: USDC
+    amount: "0.30"
+    from: "0x9392cc8C422B1e29C1648e0B535c4670B822FabD"
+    to: treasury_public_key_configured_on_backend
+    hash: "0x77f5b48d75c69785be5bb858731b602c31a9ef36eb10939ee8824730a4278a1e"
+    receipt_status: success
+
+api_exercise:
+  authentication:
+    - request: GET /health without API key
+      response: 200
+      returned: status ok and deployed build SHA
+    - request: GET /jobs/{job_id} without API key
+      response: 401
+      returned: unauthorized
+  lifecycle:
+    - request: POST /jobs with one agent and paymentMode x402
+      response: 402
+      returned:
+        error: payment_required
+        network: eip155:99901
+        asset: "0xb47c4C8F73F009CC0C0d3f92B388d13E293F0B65"
+        amount_base_units: "300000"
+        pay_to: "0x9392cc8C422B1e29C1648e0B535c4670B822FabD"
+    - request: POST /jobs/{job_id}/payment with confirmed deposit transaction
+      response: 202
+      returned:
+        status: queued
+    - request: GET /jobs/{job_id}
+      response: 200
+      returned:
+        status: settled
+        treasury_payout_transaction: "0x77f5b48d75c69785be5bb858731b602c31a9ef36eb10939ee8824730a4278a1e"
+    - request: GET /jobs/{job_id}/agents
+      response: 200
+      returned:
+        - agent_number: 1
+          status: completed
+          output: "JellySwarm end-to-end test completed."
+  additional_route_checks:
+    - route: GET /jobs/{job_id}/settlement/typed-data
+      response: 409
+      returned: job_not_ready_for_settlement
+      reason: the job succeeded and did not need a refund decision
+    - route: POST /jobs/{job_id}/settlement
+      response: 409
+      returned: job_not_ready_for_refund_decision
+      reason: the job succeeded and did not need a refund decision
+    - note: Job routes were also checked for authentication, input validation, and missing-job responses.
+
+results:
+  deposit_transfer_event_verified: true
+  agent_execution_verified: true
+  treasury_payout_transfer_event_verified: true
+  payment_confirmation_depth_verified: true
+  final_job_status: settled
+  final_agent_status: completed
+  direct_payment_mode_end_to_end_tested: false
+  refund_payout_end_to_end_tested: false
+  secrets_or_private_keys_included: false
+
+proved:
+  - The production x402 endpoint returns a quote for the configured Elysium USDC asset and escrow wallet.
+  - The payment API accepts the deposit only after its on-chain transfer is confirmed.
+  - A paid one-agent job executes and returns its result through the job APIs.
+  - A successful job transfers the full USDC proceeds from escrow to the configured treasury.
+  - Health is public, while protected job APIs require the master API key.

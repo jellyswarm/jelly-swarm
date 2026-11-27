@@ -71,7 +71,7 @@ Configure `DATABASE_URL` and any future service secrets in the Render backend en
 
 `POST /jobs` returns a custom x402 `exact-transfer` challenge or a direct USDC quote. The user transfers USDC to the escrow EOA and pays HYPE gas. The backend verifies the transfer and runs up to 247 agents (20 concurrent provider calls at a time) plus a synthesis call. Successful proceeds are sent to treasury. For failed jobs, an operator decision signed by the treasury wallet sets the client refund to 100%, 70%, or 50%; the escrow wallet executes the payouts.
 
-`PRICE_PER_AGENT_USDC` is the customer-facing charge per agent, not OpenRouter's provider cost. It is multiplied by the selected agent count; synthesis is included. Configure the per-agent price before accepting live jobs. OpenRouter's current model selection is `tencent/hy4-flash`, with provider routing sorted by price.
+`PRICE_PER_AGENT_USDC` is the customer-facing charge per agent, not OpenRouter's provider cost. It is multiplied by the selected agent count; synthesis is included. It is set to `0.3`, so a 247-agent job is 74.1 USDC. OpenRouter's current model selection is `tencent/hy4-flash`, with provider routing sorted by price.
 
 ## License
 

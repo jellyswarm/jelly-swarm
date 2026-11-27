@@ -1,4 +1,4 @@
-CREATE TABLE jobs (
+CREATE TABLE swarm_jobs (
   id char(64) PRIMARY KEY,
   client_address text NOT NULL CHECK (client_address ~ '^0x[0-9a-fA-F]{40}$'),
   task text NOT NULL,
@@ -16,10 +16,10 @@ CREATE TABLE jobs (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX jobs_status_created_idx ON jobs (status, created_at);
+CREATE INDEX swarm_jobs_status_created_idx ON swarm_jobs (status, created_at);
 
-CREATE TABLE job_agents (
-  job_id char(64) NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+CREATE TABLE swarm_job_agents (
+  job_id char(64) NOT NULL REFERENCES swarm_jobs(id) ON DELETE CASCADE,
   agent_number smallint NOT NULL CHECK (agent_number BETWEEN 1 AND 247),
   status text NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed')),
   output text,

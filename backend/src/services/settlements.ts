@@ -23,11 +23,11 @@ async function trackedTransfer(
   if (!hash) {
     const sentHash = await sendEscrowTransfer(recipient, amount);
     hash = sentHash;
-    await pool.query(`UPDATE jobs SET ${column} = $2, updated_at = now() WHERE id = $1`, [jobId, hash]);
+    await pool.query(`UPDATE swarm_jobs SET ${column} = $2, updated_at = now() WHERE id = $1`, [jobId, hash]);
   }
   const receipt = await getChainClient().waitForTransactionReceipt({ hash: hash as Hash, confirmations: 3, timeout: 90_000 });
   if (receipt.status !== "success") {
-    await pool.query(`UPDATE jobs SET ${column} = NULL, updated_at = now() WHERE id = $1 AND ${column} = $2`, [jobId, hash]);
+    await pool.query(`UPDATE swarm_jobs SET ${column} = NULL, updated_at = now() WHERE id = $1 AND ${column} = $2`, [jobId, hash]);
     throw new Error("payout_transaction_reverted");
   }
   return hash;
@@ -53,7 +53,7 @@ export async function executeSuccessPayout(jobId: string) {
     const result = await pool.query<PayoutJob>(
       `SELECT client_address, amount_base_units, status, settlement_share_bps,
               client_payout_tx_hash, treasury_payout_tx_hash
-       FROM jobs WHERE id = $1`,
+       FROM swarm_jobs WHERE id = $1`,
       [jobId],
     );
     const job = result.rows[0];
@@ -70,7 +70,7 @@ export async function executeSuccessPayout(jobId: string) {
     );
     const finalHash = treasuryHash;
     await pool.query(
-      "UPDATE jobs SET status = 'settled', settlement_tx_hash = $2, updated_at = now() WHERE id = $1 AND status = 'payout_pending'",
+      "UPDATE swarm_jobs SET status = 'settled', settlement_tx_hash = $2, updated_at = now() WHERE id = $1 AND status = 'payout_pending'",
       [jobId, finalHash],
     );
     return { status: "settled", transactions: finalHash ? [finalHash] : [] };
@@ -83,7 +83,7 @@ export async function executeRefundPayout(jobId: string) {
     const result = await pool.query<PayoutJob>(
       `SELECT client_address, amount_base_units, status, settlement_share_bps,
               client_payout_tx_hash, treasury_payout_tx_hash
-       FROM jobs WHERE id = $1`,
+       FROM swarm_jobs WHERE id = $1`,
       [jobId],
     );
     const job = result.rows[0];
@@ -110,7 +110,7 @@ export async function executeRefundPayout(jobId: string) {
     );
     const finalHash = treasuryHash ?? clientHash;
     await pool.query(
-      "UPDATE jobs SET status = 'settled', settlement_tx_hash = $2, updated_at = now() WHERE id = $1 AND status = 'settlement_pending'",
+      "UPDATE swarm_jobs SET status = 'settled', settlement_tx_hash = $2, updated_at = now() WHERE id = $1 AND status = 'settlement_pending'",
       [jobId, finalHash],
     );
     return { status: "settled", transactions: [clientHash, treasuryHash].filter((hash): hash is string => Boolean(hash)) };

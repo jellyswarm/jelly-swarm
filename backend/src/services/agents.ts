@@ -76,12 +76,12 @@ async function synthesize(task: string, outputs: string[]): Promise<string> {
 
 export async function runJobAgents(jobId: string, task: string, agentCount: number): Promise<void> {
   const claimed = await pool.query(
-    "UPDATE jobs SET status = 'running', updated_at = now() WHERE id = $1 AND status = 'queued' RETURNING id",
+    "UPDATE swarm_jobs SET status = 'running', updated_at = now() WHERE id = $1 AND status = 'queued' RETURNING id",
     [jobId],
   );
   if (!claimed.rowCount) return;
   await pool.query(
-    `INSERT INTO job_agents (job_id, agent_number, status)
+    `INSERT INTO swarm_job_agents (job_id, agent_number, status)
      SELECT $1, n, 'queued' FROM generate_series(1, $2::int) AS n
      ON CONFLICT (job_id, agent_number) DO NOTHING`,
     [jobId, agentCount],
@@ -95,19 +95,19 @@ export async function runJobAgents(jobId: string, task: string, agentCount: numb
       if (index >= agentCount) return;
       const agentNumber = index + 1;
       await pool.query(
-        "UPDATE job_agents SET status = 'running', updated_at = now() WHERE job_id = $1 AND agent_number = $2",
+        "UPDATE swarm_job_agents SET status = 'running', updated_at = now() WHERE job_id = $1 AND agent_number = $2",
         [jobId, agentNumber],
       );
       try {
         const output = await runAgent(task, agentNumber, agentCount);
         results[index] = output;
         await pool.query(
-          "UPDATE job_agents SET status = 'completed', output = $3, updated_at = now() WHERE job_id = $1 AND agent_number = $2",
+          "UPDATE swarm_job_agents SET status = 'completed', output = $3, updated_at = now() WHERE job_id = $1 AND agent_number = $2",
           [jobId, agentNumber, output],
         );
       } catch (error) {
         await pool.query(
-          "UPDATE job_agents SET status = 'failed', error_code = $3, updated_at = now() WHERE job_id = $1 AND agent_number = $2",
+          "UPDATE swarm_job_agents SET status = 'failed', error_code = $3, updated_at = now() WHERE job_id = $1 AND agent_number = $2",
           [jobId, agentNumber, error instanceof Error ? error.message.slice(0, 100) : "agent_failed"],
         );
       }
@@ -116,11 +116,11 @@ export async function runJobAgents(jobId: string, task: string, agentCount: numb
   await Promise.all(workers);
 
   const rows = await pool.query<AgentRecord>(
-    "SELECT agent_number FROM job_agents WHERE job_id = $1 AND status = 'failed' ORDER BY agent_number",
+    "SELECT agent_number FROM swarm_job_agents WHERE job_id = $1 AND status = 'failed' ORDER BY agent_number",
     [jobId],
   );
   if (rows.rowCount) {
-    await pool.query("UPDATE jobs SET status = 'failed', error_code = 'agent_failed', updated_at = now() WHERE id = $1", [jobId]);
+    await pool.query("UPDATE swarm_jobs SET status = 'failed', error_code = 'agent_failed', updated_at = now() WHERE id = $1", [jobId]);
     return;
   }
 
@@ -128,11 +128,11 @@ export async function runJobAgents(jobId: string, task: string, agentCount: numb
   try {
     result = await synthesize(task, results);
   } catch {
-    await pool.query("UPDATE jobs SET status = 'failed', error_code = 'synthesis_failed', updated_at = now() WHERE id = $1", [jobId]);
+    await pool.query("UPDATE swarm_jobs SET status = 'failed', error_code = 'synthesis_failed', updated_at = now() WHERE id = $1", [jobId]);
     return;
   }
   await pool.query(
-    "UPDATE jobs SET status = 'payout_pending', result = $2::jsonb, updated_at = now() WHERE id = $1",
+    "UPDATE swarm_jobs SET status = 'payout_pending', result = $2::jsonb, updated_at = now() WHERE id = $1",
     [jobId, JSON.stringify({ answer: result, agentCount, agentFindings: results })],
   );
   await executeSuccessPayout(jobId).catch(() => console.error(`Successful payout remains pending for job ${jobId}.`));

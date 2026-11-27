@@ -55,7 +55,7 @@ jobsRouter.post("/", async (req, res) => {
   if (amount > (1n << 128n) - 1n) return res.status(400).json({ error: "quote_too_large" });
   const jobId = randomBytes(32).toString("hex");
   await pool.query(
-    `INSERT INTO jobs (id, client_address, task, agent_count, amount_base_units, status)
+    `INSERT INTO swarm_jobs (id, client_address, task, agent_count, amount_base_units, status)
      VALUES ($1, $2, $3, $4, $5, 'payment_pending')`,
     [jobId, clientAddress.toLowerCase(), task, agentCount, amount.toString()],
   );
@@ -101,7 +101,7 @@ jobsRouter.post("/:id/payment", async (req, res) => {
     amount_base_units: string;
     status: string;
     payment_tx_hash: string | null;
-  }>("SELECT client_address, amount_base_units, status, payment_tx_hash FROM jobs WHERE id = $1", [id.toLowerCase()]);
+  }>("SELECT client_address, amount_base_units, status, payment_tx_hash FROM swarm_jobs WHERE id = $1", [id.toLowerCase()]);
   const job = found.rows[0];
   if (!job) return res.status(404).json({ error: "job_not_found" });
   if (job.status !== "payment_pending") {
@@ -123,14 +123,14 @@ jobsRouter.post("/:id/payment", async (req, res) => {
   }
 
   const updated = await pool.query(
-    `UPDATE jobs SET status = 'queued', payment_tx_hash = $2, updated_at = now()
+    `UPDATE swarm_jobs SET status = 'queued', payment_tx_hash = $2, updated_at = now()
      WHERE id = $1 AND status = 'payment_pending' RETURNING task, agent_count`,
     [id.toLowerCase(), txHash.toLowerCase()],
   );
   if (!updated.rows[0]) return res.status(409).json({ error: "job_payment_already_recorded" });
   const paidJob = updated.rows[0] as { task: string; agent_count: number };
   void runJobAgents(id.toLowerCase(), paidJob.task, paidJob.agent_count).catch(async () => {
-    await pool.query("UPDATE jobs SET status = 'failed', error_code = 'agent_worker_failed', updated_at = now() WHERE id = $1", [id.toLowerCase()]);
+    await pool.query("UPDATE swarm_jobs SET status = 'failed', error_code = 'agent_worker_failed', updated_at = now() WHERE id = $1", [id.toLowerCase()]);
   });
   return res.status(202).json({ jobId: `0x${id}`, status: "queued" });
 });
@@ -146,7 +146,7 @@ jobsRouter.get("/:id", async (req, res) => {
             client_payout_tx_hash AS "clientPayoutTransactionHash",
             treasury_payout_tx_hash AS "treasuryPayoutTransactionHash",
             created_at AS "createdAt", updated_at AS "updatedAt"
-     FROM jobs WHERE id = $1`,
+     FROM swarm_jobs WHERE id = $1`,
     [id.toLowerCase()],
   );
   if (!result.rows[0]) return res.status(404).json({ error: "job_not_found" });
@@ -159,7 +159,7 @@ jobsRouter.get("/:id/agents", async (req, res) => {
   const result = await pool.query(
     `SELECT agent_number AS "agentNumber", status, output, error_code AS "errorCode",
             created_at AS "createdAt", updated_at AS "updatedAt"
-     FROM job_agents WHERE job_id = $1 ORDER BY agent_number`,
+     FROM swarm_job_agents WHERE job_id = $1 ORDER BY agent_number`,
     [id.toLowerCase()],
   );
   return res.json({ agents: result.rows });
@@ -176,7 +176,7 @@ jobsRouter.get("/:id/settlement/typed-data", async (req, res) => {
   const payment = paymentConfiguration(res);
   if (!payment) return;
   const result = await pool.query<{ status: string; client_address: string; amount_base_units: string }>(
-    "SELECT status, client_address, amount_base_units FROM jobs WHERE id = $1",
+    "SELECT status, client_address, amount_base_units FROM swarm_jobs WHERE id = $1",
     [id.toLowerCase()],
   );
   if (!result.rows[0]) return res.status(404).json({ error: "job_not_found" });
@@ -215,7 +215,7 @@ jobsRouter.post("/:id/settlement", async (req, res) => {
   if (!treasury || !/^0x[\da-fA-F]{40}$/.test(treasury)) return res.status(503).json({ error: "treasury_signer_not_configured" });
 
   const result = await pool.query<{ status: string; client_address: string; amount_base_units: string }>(
-    "SELECT status, client_address, amount_base_units FROM jobs WHERE id = $1",
+    "SELECT status, client_address, amount_base_units FROM swarm_jobs WHERE id = $1",
     [id.toLowerCase()],
   );
   const job = result.rows[0];
@@ -248,14 +248,14 @@ jobsRouter.post("/:id/settlement", async (req, res) => {
   if (recovered.toLowerCase() !== treasury.toLowerCase()) return res.status(403).json({ error: "unauthorized_treasury_signature" });
 
   const stored = await pool.query(
-    `UPDATE jobs SET status = 'settlement_pending', settlement_share_bps = $2,
+    `UPDATE swarm_jobs SET status = 'settlement_pending', settlement_share_bps = $2,
             settlement_deadline = $3, settlement_signature = $4, updated_at = now()
      WHERE id = $1 AND status = 'failed' RETURNING id`,
     [id.toLowerCase(), clientShareBps, deadline, signature],
   );
   if (!stored.rows[0]) {
     const existing = await pool.query<{ settlement_signature: string | null; settlement_share_bps: number | null }>(
-      "SELECT settlement_signature, settlement_share_bps FROM jobs WHERE id = $1 AND status = 'settlement_pending'",
+      "SELECT settlement_signature, settlement_share_bps FROM swarm_jobs WHERE id = $1 AND status = 'settlement_pending'",
       [id.toLowerCase()],
     );
     if (existing.rows[0]?.settlement_signature !== signature || existing.rows[0]?.settlement_share_bps !== clientShareBps) {

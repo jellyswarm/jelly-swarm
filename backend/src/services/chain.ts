@@ -1,58 +1,59 @@
 import {
   createPublicClient,
+  createWalletClient,
   defineChain,
   fallback,
   getAddress,
   http,
   parseEventLogs,
   parseUnits,
+  type Address,
   type Hash,
+  type Hex,
 } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 
-export const escrowAbi = [
+export const erc20Abi = [
   {
     type: "event",
-    name: "JobFunded",
+    name: "Transfer",
     anonymous: false,
     inputs: [
-      { indexed: true, name: "jobId", type: "bytes32" },
-      { indexed: true, name: "client", type: "address" },
-      { indexed: false, name: "amount", type: "uint256" },
+      { indexed: true, name: "from", type: "address" },
+      { indexed: true, name: "to", type: "address" },
+      { indexed: false, name: "value", type: "uint256" },
     ],
   },
   {
     type: "function",
-    name: "settleJob",
+    name: "transfer",
     stateMutability: "nonpayable",
     inputs: [
-      { name: "jobId", type: "bytes32" },
-      { name: "clientShareBps", type: "uint16" },
-      { name: "deadline", type: "uint256" },
-      { name: "signature", type: "bytes" },
+      { name: "to", type: "address" },
+      { name: "value", type: "uint256" },
     ],
-    outputs: [],
+    outputs: [{ name: "", type: "bool" }],
   },
   {
-    type: "event",
-    name: "JobSettled",
-    anonymous: false,
-    inputs: [
-      { indexed: true, name: "jobId", type: "bytes32" },
-      { indexed: true, name: "client", type: "address" },
-      { indexed: false, name: "clientAmount", type: "uint256" },
-      { indexed: false, name: "treasuryAmount", type: "uint256" },
-      { indexed: false, name: "clientShareBps", type: "uint16" },
-      { indexed: false, name: "nonce", type: "uint256" },
-    ],
+    type: "function",
+    name: "symbol",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "string" }],
+  },
+  {
+    type: "function",
+    name: "decimals",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint8" }],
   },
 ] as const;
 
 export function getChainConfig() {
   const id = Number(process.env.ELYSIUM_CHAIN_ID);
   const rpcUrl = process.env.ELYSIUM_RPC_URL;
-  if (!Number.isSafeInteger(id) || id <= 0 || !rpcUrl) {
-    throw new Error("elysium_config_missing");
-  }
+  if (!Number.isSafeInteger(id) || id <= 0 || !rpcUrl) throw new Error("elysium_config_missing");
   return defineChain({
     id,
     name: "Elysium",
@@ -61,40 +62,68 @@ export function getChainConfig() {
   });
 }
 
-export function getChainClient() {
-  const chain = getChainConfig();
-  const primary = process.env.ELYSIUM_RPC_URL!;
+function getTransport() {
+  const primary = process.env.ELYSIUM_RPC_URL;
+  if (!primary) throw new Error("elysium_config_missing");
   const backup = process.env.ELYSIUM_BACKUP_RPC_URL;
-  const transport = backup ? fallback([http(primary), http(backup)]) : http(primary);
-  return createPublicClient({ chain, transport });
+  return backup ? fallback([http(primary), http(backup)]) : http(primary);
+}
+
+export function getChainClient() {
+  return createPublicClient({ chain: getChainConfig(), transport: getTransport() });
 }
 
 export function getPaymentConfig() {
-  const escrow = process.env.ESCROW_CONTRACT_ADDRESS;
-  const usdc = process.env.ELYSIUM_USDC_ADDRESS;
+  const escrowPublicKey = process.env.ESCROW_PUBLIC_KEY;
+  const usdcAddress = process.env.ELYSIUM_USDC_ADDRESS;
+  const treasuryPublicKey = process.env.TREASURY_PUBLIC_KEY;
   const pricePerAgent = process.env.PRICE_PER_AGENT_USDC;
-  if (!escrow || !usdc || !pricePerAgent) throw new Error("payment_config_missing");
-  if (!/^0x[\da-fA-F]{40}$/.test(escrow) || !/^0x[\da-fA-F]{40}$/.test(usdc)) {
+  if (!escrowPublicKey || !usdcAddress || !treasuryPublicKey || !pricePerAgent) throw new Error("payment_config_missing");
+  if (!/^0x[\da-fA-F]{40}$/.test(escrowPublicKey) || !/^0x[\da-fA-F]{40}$/.test(usdcAddress) || !/^0x[\da-fA-F]{40}$/.test(treasuryPublicKey)) {
     throw new Error("payment_config_invalid");
   }
-  const pricePerCallBaseUnits = parseUnits(pricePerAgent, 6);
-  if (pricePerCallBaseUnits <= 0n) throw new Error("payment_config_invalid");
-  return { escrow: getAddress(escrow), usdc: getAddress(usdc), pricePerCallBaseUnits };
+  const pricePerAgentBaseUnits = parseUnits(pricePerAgent, 6);
+  if (pricePerAgentBaseUnits <= 0n) throw new Error("payment_config_invalid");
+  return {
+    escrow: getAddress(escrowPublicKey),
+    usdc: getAddress(usdcAddress),
+    treasury: getAddress(treasuryPublicKey),
+    pricePerAgentBaseUnits,
+  };
+}
+
+function getEscrowAccount() {
+  const configuredAddress = process.env.ESCROW_PUBLIC_KEY;
+  const rawKey = process.env.ESCROW_PRIVATE_KEY;
+  if (!configuredAddress || !rawKey) throw new Error("escrow_wallet_not_configured");
+  const privateKey = (rawKey.startsWith("0x") ? rawKey : `0x${rawKey}`) as Hex;
+  if (!/^0x[\da-fA-F]{64}$/.test(privateKey)) throw new Error("escrow_private_key_invalid");
+  const account = privateKeyToAccount(privateKey);
+  if (account.address.toLowerCase() !== configuredAddress.toLowerCase()) {
+    throw new Error("escrow_wallet_key_mismatch");
+  }
+  return account;
+}
+
+export function getEscrowWalletClient() {
+  return createWalletClient({ account: getEscrowAccount(), chain: getChainConfig(), transport: getTransport() });
 }
 
 export async function assertPaymentReadiness() {
   const chain = getChainConfig();
   if (chain.id !== 99_901) throw new Error("elysium_mainnet_chain_id_mismatch");
   const payment = getPaymentConfig();
+  getEscrowAccount();
   const client = getChainClient();
-  const [actualChainId, escrowCode, usdcCode] = await Promise.all([
+  const [actualChainId, usdcCode, symbol, decimals] = await Promise.all([
     client.getChainId(),
-    client.getCode({ address: payment.escrow }),
     client.getCode({ address: payment.usdc }),
+    client.readContract({ address: payment.usdc, abi: erc20Abi, functionName: "symbol" }),
+    client.readContract({ address: payment.usdc, abi: erc20Abi, functionName: "decimals" }),
   ]);
   if (actualChainId !== chain.id) throw new Error("elysium_rpc_chain_id_mismatch");
-  if (!escrowCode || escrowCode === "0x" || !usdcCode || usdcCode === "0x") {
-    throw new Error("payment_contract_not_deployed");
+  if (!usdcCode || usdcCode === "0x" || symbol !== "USDC" || decimals !== 6) {
+    throw new Error("elysium_usdc_mismatch");
   }
   if (!process.env.OPEN_ROUTER_API_KEY || !process.env.OPENROUTER_MODEL) {
     throw new Error("agent_provider_not_configured");
@@ -104,41 +133,50 @@ export async function assertPaymentReadiness() {
 
 export async function verifyFundingReceipt(input: {
   transactionHash: Hash;
-  jobId: `0x${string}`;
-  clientAddress: `0x${string}`;
+  clientAddress: Address;
   amountBaseUnits: bigint;
 }) {
-  const { escrow } = getPaymentConfig();
+  const { escrow, usdc } = getPaymentConfig();
   const client = getChainClient();
   const receipt = await client.getTransactionReceipt({ hash: input.transactionHash });
   if (receipt.status !== "success") return false;
   const head = await client.getBlockNumber();
   if (head < receipt.blockNumber + 2n) return false;
-
-  const events = parseEventLogs({ abi: escrowAbi, logs: receipt.logs, eventName: "JobFunded" });
+  const events = parseEventLogs({ abi: erc20Abi, logs: receipt.logs, eventName: "Transfer" });
   return events.some(({ address, args }) =>
-    address.toLowerCase() === escrow.toLowerCase() &&
-    args.jobId.toLowerCase() === input.jobId.toLowerCase() &&
-    args.client.toLowerCase() === input.clientAddress.toLowerCase() &&
-    args.amount === input.amountBaseUnits
+    address.toLowerCase() === usdc.toLowerCase() &&
+    args.from.toLowerCase() === input.clientAddress.toLowerCase() &&
+    args.to.toLowerCase() === escrow.toLowerCase() &&
+    args.value === input.amountBaseUnits
   );
 }
 
-export async function verifySettlementReceipt(input: {
+export async function sendEscrowTransfer(to: Address, amount: bigint): Promise<Hash> {
+  const { usdc } = getPaymentConfig();
+  return getEscrowWalletClient().writeContract({
+    address: usdc,
+    abi: erc20Abi,
+    functionName: "transfer",
+    args: [to, amount],
+  });
+}
+
+export async function verifyEscrowTransfer(input: {
   transactionHash: Hash;
-  jobId: `0x${string}`;
-  clientShareBps: number;
+  recipient: Address;
+  amountBaseUnits: bigint;
 }) {
-  const { escrow } = getPaymentConfig();
+  const { escrow, usdc } = getPaymentConfig();
   const client = getChainClient();
   const receipt = await client.getTransactionReceipt({ hash: input.transactionHash });
   if (receipt.status !== "success") return false;
   const head = await client.getBlockNumber();
   if (head < receipt.blockNumber + 2n) return false;
-  const events = parseEventLogs({ abi: escrowAbi, logs: receipt.logs, eventName: "JobSettled" });
+  const events = parseEventLogs({ abi: erc20Abi, logs: receipt.logs, eventName: "Transfer" });
   return events.some(({ address, args }) =>
-    address.toLowerCase() === escrow.toLowerCase() &&
-    args.jobId.toLowerCase() === input.jobId.toLowerCase() &&
-    args.clientShareBps === input.clientShareBps
+    address.toLowerCase() === usdc.toLowerCase() &&
+    args.from.toLowerCase() === escrow.toLowerCase() &&
+    args.to.toLowerCase() === input.recipient.toLowerCase() &&
+    args.value === input.amountBaseUnits
   );
 }

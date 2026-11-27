@@ -12,8 +12,7 @@ const elysium = defineChain({
   rpcUrls: { default: { http: ["https://rpc.elysium.kinetiq.xyz"] } },
   blockExplorers: { default: { name: "Elysium Explorer", url: "https://elysium.kinetiq.xyz/explorer" } },
 });
-const erc20Abi = parseAbi(["function approve(address spender, uint256 value) returns (bool)"]);
-const escrowAbi = parseAbi(["function fundJob(bytes32 jobId, uint128 amount)"]);
+const erc20Abi = parseAbi(["function transfer(address to, uint256 amount) returns (bool)"]);
 const publicClient = createPublicClient({ chain: elysium, transport: http() });
 
 async function ensureWallet(walletClient) {
@@ -68,7 +67,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!jobId || !["queued", "running"].includes(job?.status)) return;
+    if (!jobId || !["queued", "running", "payout_pending"].includes(job?.status)) return;
     const poll = async () => {
       try {
         const { body } = await api(`/jobs/${jobId}`);
@@ -130,23 +129,12 @@ function App() {
         throw new Error("Reconnect the wallet used to create this quote.");
       }
       const payment = quote.payment.accepts[0];
-      setPhase("approving");
-      const approvalHash = await walletClient.writeContract({
-        account: address,
-        address: USDC,
-        abi: erc20Abi,
-        functionName: "approve",
-        args: [payment.payTo, BigInt(payment.amount)],
-      });
-      const approvalReceipt = await publicClient.waitForTransactionReceipt({ hash: approvalHash });
-      if (approvalReceipt.status !== "success") throw new Error("USDC approval failed.");
-
       setPhase("funding");
       const fundHash = await walletClient.writeContract({
         account: address,
-        address: quote.fundCall.contract,
-        abi: escrowAbi,
-        functionName: "fundJob",
+        address: USDC,
+        abi: erc20Abi,
+        functionName: "transfer",
         args: [quote.fundCall.args[0], BigInt(quote.fundCall.args[1])],
       });
       const fundingReceipt = await publicClient.waitForTransactionReceipt({ hash: fundHash });
@@ -234,7 +222,7 @@ function App() {
               {busy ? <><span className="spinner" /> {phaseLabel(phase)}</> : <>Get payment quote <span aria-hidden="true">↗</span></>}
             </button>
           </div>
-          <div className="payment-note"><span className="lock-mark">⌑</span> USDC is held in escrow until an operator signs a settlement decision. You’ll need HYPE for approval and funding gas.</div>
+          <div className="payment-note"><span className="lock-mark">⌑</span> USDC is sent to the escrow wallet up front. You’ll need HYPE for your payment transaction; JellySwarm does not sponsor user gas.</div>
         </form>
       </section>
 
@@ -242,7 +230,7 @@ function App() {
         {jobId && <div className="job-state-head"><div><p className="eyebrow"><span>03</span> JOB STATUS</p><h2>{statusLabel(status)}</h2></div><span className={`state-pill state-${status}`}>{status.replaceAll("_", " ")}</span></div>}
         {jobId && <p className="job-reference">JOB <code>{jobId}</code></p>}
         {quote && phase === "quoted" && <div className="quote-panel">
-          <div><span>UPFRONT TOTAL</span><strong>{formatUnits(BigInt(quote.payment.accepts[0].amount), 6)} USDC</strong><small>{quote.agentCount} agents + 1 synthesis call</small></div>
+          <div><span>UPFRONT TOTAL</span><strong>{formatUnits(BigInt(quote.payment.accepts[0].amount), 6)} USDC</strong><small>{quote.agentCount} agents; synthesis included</small></div>
           <div className="quote-actions"><button className="submit-button" onClick={confirmPayment} disabled={busy}>{busy ? <><span className="spinner" /> {phaseLabel(phase)}</> : <>Approve &amp; fund <span aria-hidden="true">↗</span></>}</button></div>
         </div>}
         {job?.status === "running" && <div className="running-line"><span /><span /><span /><span /><span /><small>{job.agentCount ?? agentCount} agents are working</small></div>}
@@ -256,11 +244,11 @@ function App() {
 }
 
 function phaseLabel(phase) {
-  return ({ connecting: "Connecting wallet", quoting: "Getting quote", approving: "Approve USDC", funding: "Funding escrow", confirming: "Confirming payment", queued: "Starting agents" })[phase] ?? "Working";
+  return ({ connecting: "Connecting wallet", quoting: "Getting quote", funding: "Sending USDC", confirming: "Confirming payment", queued: "Starting agents" })[phase] ?? "Working";
 }
 
 function statusLabel(status) {
-  return ({ payment_pending: "Awaiting payment", queued: "Your swarm is queued", running: "The swarm is working", completed: "Your result is ready", failed: "The job needs review", settlement_ready: "Settlement ready", settled: "Job settled" })[status] ?? "Job in progress";
+  return ({ payment_pending: "Awaiting payment", queued: "Your swarm is queued", running: "The swarm is working", payout_pending: "Work complete · payout pending", completed: "Your result is ready", failed: "The job needs review", settlement_pending: "Refund payout pending", settled: "Your result is ready" })[status] ?? "Job in progress";
 }
 
 createRoot(document.getElementById("root")).render(<App />);

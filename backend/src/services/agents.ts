@@ -1,4 +1,5 @@
 import { pool } from "../db";
+import { executeSuccessPayout } from "./settlements";
 
 type AgentRecord = { agent_number: number };
 
@@ -17,6 +18,7 @@ async function runAgent(task: string, agentNumber: number, total: number): Promi
     },
     body: JSON.stringify({
       model,
+      provider: { sort: "price" },
       messages: [
         {
           role: "system",
@@ -53,6 +55,7 @@ async function synthesize(task: string, outputs: string[]): Promise<string> {
     },
     body: JSON.stringify({
       model,
+      provider: { sort: "price" },
       messages: [
         { role: "system", content: "Synthesize the submitted independent work into a clear answer. Preserve useful disagreements and uncertainty. Do not add unsupported claims." },
         { role: "user", content: JSON.stringify({ task, agentFindings: outputs.map((output) => output.slice(0, 1_000)) }) },
@@ -121,13 +124,16 @@ export async function runJobAgents(jobId: string, task: string, agentCount: numb
     return;
   }
 
+  let result: string;
   try {
-    const result = await synthesize(task, results);
-    await pool.query(
-      "UPDATE jobs SET status = 'completed', result = $2::jsonb, updated_at = now() WHERE id = $1",
-      [jobId, JSON.stringify({ answer: result, agentCount, agentFindings: results })],
-    );
+    result = await synthesize(task, results);
   } catch {
     await pool.query("UPDATE jobs SET status = 'failed', error_code = 'synthesis_failed', updated_at = now() WHERE id = $1", [jobId]);
+    return;
   }
+  await pool.query(
+    "UPDATE jobs SET status = 'payout_pending', result = $2::jsonb, updated_at = now() WHERE id = $1",
+    [jobId, JSON.stringify({ answer: result, agentCount, agentFindings: results })],
+  );
+  await executeSuccessPayout(jobId).catch(() => console.error(`Successful payout remains pending for job ${jobId}.`));
 }

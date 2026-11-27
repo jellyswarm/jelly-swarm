@@ -2,12 +2,13 @@ import { randomBytes } from "node:crypto";
 import { Router, type Response } from "express";
 import { recoverTypedDataAddress, type Hash } from "viem";
 import { pool } from "../db";
-import { assertPaymentReadiness, getChainConfig, getPaymentConfig, verifyFundingReceipt, verifySettlementReceipt } from "../services/chain";
+import { assertPaymentReadiness, getChainConfig, getPaymentConfig, verifyFundingReceipt } from "../services/chain";
+import { executeRefundPayout } from "../services/settlements";
 import { runJobAgents } from "../services/agents";
 
 export const jobsRouter = Router();
 
-const shares = new Set([0, 5_000, 7_000, 10_000]);
+const shares = new Set([5_000, 7_000, 10_000]);
 const settlementTypes = {
   SettlementDecision: [
     { name: "jobId", type: "bytes32" },
@@ -48,7 +49,7 @@ jobsRouter.post("/", async (req, res) => {
   } catch (error) {
     return res.status(503).json({ error: error instanceof Error ? error.message : "payment_not_ready" });
   }
-  const amount = payment.pricePerCallBaseUnits * BigInt(agentCount + 1);
+  const amount = payment.pricePerAgentBaseUnits * BigInt(agentCount);
   if (amount > (1n << 128n) - 1n) return res.status(400).json({ error: "quote_too_large" });
   const jobId = randomBytes(32).toString("hex");
   await pool.query(
@@ -61,14 +62,14 @@ jobsRouter.post("/", async (req, res) => {
   const requirements = {
     x402Version: 1,
     accepts: [{
-      scheme: "exact-escrow",
+      scheme: "exact-transfer",
       network: `eip155:${chain.id}`,
       asset: payment.usdc,
       amount: amount.toString(),
       payTo: payment.escrow,
       resource: `/jobs/${jobId}`,
-      description: `JellySwarm job with ${agentCount} agents and one synthesis call`,
-      extra: { jobId: `0x${jobId}`, clientAddress: clientAddress.toLowerCase(), agentCount, modelCalls: agentCount + 1, maxAgents: 247 },
+      description: `JellySwarm job with ${agentCount} agents; synthesis included`,
+      extra: { jobId: `0x${jobId}`, clientAddress: clientAddress.toLowerCase(), agentCount, maxAgents: 247 },
     }],
   };
   const response = {
@@ -76,8 +77,7 @@ jobsRouter.post("/", async (req, res) => {
     agentCount,
     paymentMode,
     payment: requirements,
-    approval: { contract: payment.usdc, functionName: "approve", args: [payment.escrow, amount.toString()] },
-    fundCall: { contract: payment.escrow, functionName: "fundJob", args: [`0x${jobId}`, amount.toString()] },
+    fundCall: { contract: payment.usdc, functionName: "transfer", args: [payment.escrow, amount.toString()] },
     gasToken: "HYPE",
   };
   if (paymentMode === "x402") {
@@ -106,7 +106,6 @@ jobsRouter.post("/:id/payment", async (req, res) => {
   try {
     const valid = await verifyFundingReceipt({
       transactionHash: txHash as Hash,
-      jobId: `0x${id}`,
       clientAddress: job.client_address as `0x${string}`,
       amountBaseUnits: BigInt(job.amount_base_units),
     });
@@ -134,8 +133,10 @@ jobsRouter.get("/:id", async (req, res) => {
   const result = await pool.query(
     `SELECT id, client_address AS "clientAddress", agent_count AS "agentCount",
             amount_base_units AS "amountBaseUnits", status, payment_tx_hash AS "paymentTransactionHash",
-            result, error_code AS "errorCode", settlement_share_bps AS "settlementShareBps",
+            task, result, error_code AS "errorCode", settlement_share_bps AS "settlementShareBps",
             settlement_deadline AS "settlementDeadline", settlement_tx_hash AS "settlementTransactionHash",
+            client_payout_tx_hash AS "clientPayoutTransactionHash",
+            treasury_payout_tx_hash AS "treasuryPayoutTransactionHash",
             created_at AS "createdAt", updated_at AS "updatedAt"
      FROM jobs WHERE id = $1`,
     [id.toLowerCase()],
@@ -168,12 +169,12 @@ jobsRouter.get("/:id/settlement/typed-data", async (req, res) => {
   if (!payment) return;
   const result = await pool.query<{ status: string }>("SELECT status FROM jobs WHERE id = $1", [id.toLowerCase()]);
   if (!result.rows[0]) return res.status(404).json({ error: "job_not_found" });
-  if (result.rows[0].status !== "completed" && result.rows[0].status !== "failed") {
+  if (result.rows[0].status !== "failed" && result.rows[0].status !== "settlement_pending") {
     return res.status(409).json({ error: "job_not_ready_for_settlement" });
   }
   const chain = getChainConfig();
   return res.json({
-    domain: { name: "JellySwarmEscrow", version: "1", chainId: chain.id, verifyingContract: payment.escrow },
+    domain: { name: "JellySwarmEscrowWallet", version: "1", chainId: chain.id, verifyingContract: payment.escrow },
     types: settlementTypes,
     primaryType: "SettlementDecision",
     message: { jobId: `0x${id}`, clientShareBps, nonce: "0", deadline: String(deadline) },
@@ -194,18 +195,20 @@ jobsRouter.post("/:id/settlement", async (req, res) => {
   if (!payment) return;
   const treasury = process.env.TREASURY_PUBLIC_KEY;
   if (!treasury || !/^0x[\da-fA-F]{40}$/.test(treasury)) return res.status(503).json({ error: "treasury_signer_not_configured" });
-  if (deadline <= Math.floor(Date.now() / 1000)) return res.status(400).json({ error: "settlement_decision_expired" });
 
   const result = await pool.query<{ status: string }>("SELECT status FROM jobs WHERE id = $1", [id.toLowerCase()]);
   const job = result.rows[0];
   if (!job) return res.status(404).json({ error: "job_not_found" });
-  if (job.status !== "completed" && job.status !== "failed") return res.status(409).json({ error: "job_not_ready_for_settlement" });
+  if (job.status !== "failed" && job.status !== "settlement_pending") return res.status(409).json({ error: "job_not_ready_for_refund_decision" });
+  if (job.status === "failed" && deadline <= Math.floor(Date.now() / 1000)) {
+    return res.status(400).json({ error: "settlement_decision_expired" });
+  }
 
   const chain = getChainConfig();
   let recovered: string;
   try {
     recovered = await recoverTypedDataAddress({
-      domain: { name: "JellySwarmEscrow", version: "1", chainId: chain.id, verifyingContract: payment.escrow },
+      domain: { name: "JellySwarmEscrowWallet", version: "1", chainId: chain.id, verifyingContract: payment.escrow },
       types: settlementTypes,
       primaryType: "SettlementDecision",
       message: { jobId: `0x${id}`, clientShareBps, nonce: 0n, deadline: BigInt(deadline) },
@@ -216,42 +219,25 @@ jobsRouter.post("/:id/settlement", async (req, res) => {
   }
   if (recovered.toLowerCase() !== treasury.toLowerCase()) return res.status(403).json({ error: "unauthorized_treasury_signature" });
 
-  const updated = await pool.query(
-    `UPDATE jobs SET status = 'settlement_ready', settlement_share_bps = $2,
+  const stored = await pool.query(
+    `UPDATE jobs SET status = 'settlement_pending', settlement_share_bps = $2,
             settlement_deadline = $3, settlement_signature = $4, updated_at = now()
-     WHERE id = $1 AND status IN ('completed', 'failed') RETURNING id`,
+     WHERE id = $1 AND status = 'failed' RETURNING id`,
     [id.toLowerCase(), clientShareBps, deadline, signature],
   );
-  if (!updated.rows[0]) return res.status(409).json({ error: "settlement_already_recorded" });
-  return res.json({
-    status: "settlement_ready",
-    decision: { jobId: `0x${id}`, clientShareBps, nonce: "0", deadline, signature },
-    transaction: { to: payment.escrow, functionName: "settleJob", args: [`0x${id}`, clientShareBps, deadline, signature] },
-    gasToken: "HYPE",
-  });
-});
-
-jobsRouter.post("/:id/settlement/confirm", async (req, res) => {
-  const id = req.params.id.replace(/^0x/, "");
-  const txHash = req.body?.transactionHash;
-  if (!/^[\da-f]{64}$/i.test(id) || typeof txHash !== "string" || !/^0x[\da-fA-F]{64}$/.test(txHash)) {
-    return res.status(400).json({ error: "invalid_settlement_confirmation" });
+  if (!stored.rows[0]) {
+    const existing = await pool.query<{ settlement_signature: string | null; settlement_share_bps: number | null }>(
+      "SELECT settlement_signature, settlement_share_bps FROM jobs WHERE id = $1 AND status = 'settlement_pending'",
+      [id.toLowerCase()],
+    );
+    if (existing.rows[0]?.settlement_signature !== signature || existing.rows[0]?.settlement_share_bps !== clientShareBps) {
+      return res.status(409).json({ error: "settlement_already_recorded" });
+    }
   }
-  const found = await pool.query<{ settlement_share_bps: number; status: string }>(
-    "SELECT settlement_share_bps, status FROM jobs WHERE id = $1", [id.toLowerCase()],
-  );
-  const job = found.rows[0];
-  if (!job) return res.status(404).json({ error: "job_not_found" });
-  if (job.status !== "settlement_ready" || job.settlement_share_bps === null) return res.status(409).json({ error: "settlement_not_ready" });
   try {
-    const valid = await verifySettlementReceipt({ transactionHash: txHash as Hash, jobId: `0x${id}`, clientShareBps: job.settlement_share_bps });
-    if (!valid) return res.status(409).json({ error: "settlement_not_confirmed" });
+    const payout = await executeRefundPayout(id.toLowerCase());
+    return res.json({ jobId: `0x${id}`, status: payout.status, payouts: payout.transactions });
   } catch {
-    return res.status(502).json({ error: "settlement_verification_unavailable" });
+    return res.status(503).json({ error: "payout_pending_retry_required", status: "settlement_pending" });
   }
-  await pool.query(
-    "UPDATE jobs SET status = 'settled', settlement_tx_hash = $2, updated_at = now() WHERE id = $1 AND status = 'settlement_ready'",
-    [id.toLowerCase(), txHash.toLowerCase()],
-  );
-  return res.json({ jobId: `0x${id}`, status: "settled", transactionHash: txHash.toLowerCase() });
 });

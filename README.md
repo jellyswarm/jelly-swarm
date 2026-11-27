@@ -7,7 +7,7 @@
 ![Vite](https://img.shields.io/badge/Vite-8.x-646CFF?logo=vite&logoColor=white)
 ![Solidity](https://img.shields.io/badge/Solidity-Foundry-363636?logo=ethereum&logoColor=white)
 
-JellySwarm lets a user give one job to as many as 247 independent AI agents. The agents work in parallel and a synthesis call returns one result. Jobs are paid upfront in USDC on Elysium and held in escrow until an operator-authorized settlement. The previous project is preserved in [`legacy/`](legacy/).
+JellySwarm lets a user give one job to as many as 247 independent AI agents. The agents work in parallel and a synthesis call returns one result. Jobs are paid upfront in USDC on Elysium into the escrow wallet. The previous project is preserved in [`legacy/`](legacy/).
 
 ## Repository layout
 
@@ -16,7 +16,7 @@ JellySwarm lets a user give one job to as many as 247 independent AI agents. The
 | `src/` | Vite + React job submission and results UI |
 | `api/` | Vercel same-origin proxy; keeps `MASTER_API_KEY` server-side |
 | `backend/` | Bun + Express + PostgreSQL API and OpenRouter agent runner |
-| `contracts/` | Foundry USDC job escrow with treasury-signed EIP-712 settlements |
+| `contracts/` | Foundry scaffold; payments currently use the configured escrow EOA wallet |
 | `.github/workflows/backend.yml` | Backend checks, GHCR publishing, GitHub release, optional Render deployment |
 | `legacy/` | Previous repository state retained under the same Git history |
 
@@ -39,7 +39,7 @@ bun install
 bun run dev
 ```
 
-The API applies SQL migrations on startup. Set `DATABASE_URL` in `backend/.env` to a local PostgreSQL database. Job quotes also require an Elysium RPC, the deployed escrow contract address, `PRICE_PER_AGENT_USDC`, `OPENROUTER_MODEL`, and the OpenRouter API key. The frontend never receives `MASTER_API_KEY`.
+The API applies SQL migrations on startup. Set `DATABASE_URL` in `backend/.env` to a local PostgreSQL database. Job quotes also require an Elysium RPC, escrow wallet key pair, `TREASURY_PUBLIC_KEY`, `PRICE_PER_AGENT_USDC`, `OPENROUTER_MODEL`, and the OpenRouter API key. The frontend never receives `MASTER_API_KEY`.
 
 ## Checks
 
@@ -69,9 +69,9 @@ Configure `DATABASE_URL` and any future service secrets in the Render backend en
 
 ## Product/payment flow
 
-`POST /jobs` returns a custom x402 `exact-escrow` challenge or a direct USDC quote. The user approves USDC and calls `fundJob` on the escrow, paying HYPE gas. The backend verifies the funding event and runs up to 247 agents (20 concurrent provider calls at a time) plus a synthesis call. A treasury wallet signs the EIP-712 settlement decision, selecting the client share (100%, 70%, 50%, or 0%); anyone may submit that signed decision and pays their own gas.
+`POST /jobs` returns a custom x402 `exact-transfer` challenge or a direct USDC quote. The user transfers USDC to the escrow EOA and pays HYPE gas. The backend verifies the transfer and runs up to 247 agents (20 concurrent provider calls at a time) plus a synthesis call. Successful proceeds are sent to treasury. For failed jobs, an operator decision signed by the treasury wallet sets the client refund to 100%, 70%, or 50%; the escrow wallet executes the payouts.
 
-The escrow is not deployed yet. Configure the agreed per-model-call price and deployed contract address before accepting live jobs. Review the contract and exercise the full flow on Elysium testnet before mainnet deployment.
+`PRICE_PER_AGENT_USDC` is the customer-facing charge per agent, not OpenRouter's provider cost. It is multiplied by the selected agent count; synthesis is included. Configure the per-agent price before accepting live jobs. OpenRouter's current model selection is `tencent/hy4-flash`, with provider routing sorted by price.
 
 ## License
 

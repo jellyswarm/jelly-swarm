@@ -1,7 +1,5 @@
 # Contracts
 
-`JellySwarmEscrow` holds Elysium USDC job payments. The client approves and funds a unique job, then the treasury signs an EIP-712 settlement decision. Supported client shares are 100%, 70%, 50%, and 0%; the remainder goes to the treasury. A decision is chain-, contract-, job-, nonce-, and deadline-bound. Anyone can submit the signed decision and pays their own gas.
+The current payment design uses the configured escrow EOA wallet (`ESCROW_PUBLIC_KEY`) to hold USDC. The backend uses its matching `ESCROW_PRIVATE_KEY` to distribute funds after verifying a treasury-signed EIP-712 refund decision. No product escrow contract is required for this custody model.
 
-`JellySwarmCore` remains as the original scaffold and is not used for payments. The deployment script checks that `ESCROW_PRIVATE_KEY` matches `ESCROW_PUBLIC_KEY`, then deploys the escrow using `ELYSIUM_USDC_ADDRESS` and `TREASURY_PUBLIC_KEY`. Deploy only after reviewing the contract and its tests on Elysium testnet.
-
-Install the local test dependency with `forge install --no-git foundry-rs/forge-std`, then run `forge build` and `forge test`.
+`JellySwarmCore.sol` is the original scaffold placeholder and is not part of the payment flow. Do not deploy it for production payments.

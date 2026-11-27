@@ -17,7 +17,7 @@ JellySwarm lets a user give one job to as many as 247 independent AI agents. The
 | `api/` | Vercel same-origin proxy; keeps `MASTER_API_KEY` server-side |
 | `backend/` | Bun + Express + PostgreSQL API and OpenRouter agent runner |
 | `contracts/` | Foundry scaffold; payments currently use the configured escrow EOA wallet |
-| `.github/workflows/backend.yml` | Backend checks, GHCR publishing, GitHub release, optional Render deployment |
+| `.github/workflows/backend.yml` | Public-repo backend checks, GHCR publishing, GitHub release, optional Render deployment |
 | `legacy/` | Previous repository state retained under the same Git history |
 
 ## Run locally
@@ -61,9 +61,9 @@ forge test
 
 ## Backend image and deployment
 
-The private repo's `main` workflow builds and publishes `ghcr.io/notadeveloper7/jellyswarm-backend` after tests pass, creates a GitHub release, then triggers Render if `RENDER_DEPLOY_HOOK_URL` is configured. The public repository runs backend checks but does not publish or deploy. Vercel needs `BACKEND_API_URL` and `MASTER_API_KEY` as server-side environment variables for its allowlisted `/api` proxy.
+Only `jellyswarm/jelly-swarm` runs the backend workflow: public pushes and pull requests run checks, while pushes to public `main` also publish `ghcr.io/jellyswarm/jellyswarm-backend`, create a GitHub release, and trigger Render when the public repository secret `RENDER_DEPLOY_HOOK_URL` is configured. Workflow jobs skip in the private repo. Vercel needs `BACKEND_API_URL` and `MASTER_API_KEY` as server-side environment variables for its allowlisted `/api` proxy.
 
-After updating private `main`, run `python3 scripts/sync-public.py` to publish its history to the public repo with the `jellyswarm` commit identity. The mirror excludes `technical-docs/`.
+After updating private `main`, run `python3 scripts/sync-public.py` to publish its history to the public repo with the `jellyswarm` commit identity. Backend CI, package publishing, release creation, and optional deployment then run from public `main`. The mirror excludes `technical-docs/`.
 
 Configure `DATABASE_URL` and any future service secrets in the Render backend environment. The current health endpoint is `GET /health/`.
 

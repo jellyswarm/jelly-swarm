@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   check:
-    if: github.repository == 'NotADeveloper7/jellyswarm' || github.repository == 'jellyswarm/jelly-swarm'
+    if: github.repository == 'jellyswarm/jelly-swarm'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -29,7 +29,7 @@ jobs:
 
   build-push:
     needs: check
-    if: github.repository == 'NotADeveloper7/jellyswarm' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.repository == 'jellyswarm/jelly-swarm' && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -50,12 +50,12 @@ jobs:
           push: true
           build-args: APP_COMMIT_SHA=${{ github.sha }}
           tags: |
-            ghcr.io/notadeveloper7/jellyswarm-backend:latest
-            ghcr.io/notadeveloper7/jellyswarm-backend:${{ github.sha }}
+            ghcr.io/jellyswarm/jellyswarm-backend:latest
+            ghcr.io/jellyswarm/jellyswarm-backend:${{ github.sha }}
 
   release:
     needs: build-push
-    if: github.repository == 'NotADeveloper7/jellyswarm' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.repository == 'jellyswarm/jelly-swarm' && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -80,7 +80,7 @@ jobs:
 
   deploy:
     needs: release
-    if: github.repository == 'NotADeveloper7/jellyswarm' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.repository == 'jellyswarm/jelly-swarm' && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Render deployment when configured

@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 import { forward } from "./api/_proxy.js";
 
 /**
- * Local /api proxy. It uses the same rules as the Vercel function (api/[...path].js):
+ * Local /api proxy. It uses the same rules as the Vercel function (api/proxy.js):
  * only the allowlisted job routes, with MASTER_API_KEY added here on the server.
  * The browser never sees the key and never calls the backend directly, so no CORS.
  */

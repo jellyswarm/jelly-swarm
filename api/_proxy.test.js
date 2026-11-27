@@ -67,3 +67,13 @@ describe("forward", () => {
     expect(out.status).toBe(502);
   });
 });
+
+describe("Vercel rewrite", () => {
+  test("restores the original /api path and query from the rewrite", async () => {
+    const { originalUrl } = await import("./proxy.js");
+    const job = "0x" + "ab".repeat(32);
+    expect(originalUrl(`/api/proxy?__path=jobs/${job}/payment`)).toBe(`/api/jobs/${job}/payment`);
+    expect(originalUrl(`/api/proxy?__path=jobs&x=1`)).toBe("/api/jobs?x=1");
+    expect(originalUrl(`/api/jobs/${job}`)).toBe(`/api/jobs/${job}`);
+  });
+});

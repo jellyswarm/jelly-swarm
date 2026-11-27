@@ -1,4 +1,4 @@
-// Server-side proxy rules shared by the Vercel function (api/[...path].js) and the local
+// Server-side proxy rules shared by the Vercel function (api/proxy.js) and the local
 // dev server (dev-server.ts). The browser only ever calls same-origin /api/...; this code
 // adds the backend key on the server, so the key never reaches the page and no CORS is needed.
 

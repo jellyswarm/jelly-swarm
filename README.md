@@ -1,85 +1,75 @@
-# jelly-core
+# JellySwarm
 
-The shared engine behind Fanout, Trawl and Picket. Internal.
+[![Backend CI](https://github.com/jellyswarm/jelly-swarm/actions/workflows/backend.yml/badge.svg)](https://github.com/jellyswarm/jelly-swarm/actions/workflows/backend.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)
+![Bun](https://img.shields.io/badge/Bun-1.4.5-000000?logo=bun&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-8.x-646CFF?logo=vite&logoColor=white)
+![Solidity](https://img.shields.io/badge/Solidity-Foundry-363636?logo=ethereum&logoColor=white)
 
-The source of truth for behaviour is `docs/source/core-backend.txt` (extracted
-from the build doc PDF beside it). Section references such as §3.2 in code
-comments point there.
+JellySwarm is being rebuilt from a clean scaffold. The previous project, including its code, docs, and assets, is preserved in [`legacy/`](legacy/). The product direction and new domain model are intentionally not carried forward as implementation requirements.
 
-## Layout
+## Repository layout
 
-| Path | Contents |
-|---|---|
-| `packages/shared` | Constants from the hard rules, money helpers, chain registry, env |
-| `packages/db` | Drizzle schema and migrations |
-| `packages/receipts` | Signed receipt per call, per-job hash chain, Merkle root, verifier |
-| `packages/budget-guard` | Atomic spend reservations against the quote and daily budgets (memory and Redis) |
-| `packages/policy` | Data envelopes, registered system prompts, role tool manifests |
-| `packages/gateway` | Model router: tier and host rules, health, fallback, budget, receipts |
-| `packages/engine` | Job spec, wallet rule, pricebook, signed quotes, scheduler, worker loop, job engine |
-| `packages/fetcher` | The one way to read the web: SSRF guard, robots.txt, page text |
-| `packages/tools` | Worker's read-only tools (fetch_url, chain_read) and the chain reader |
-| `packages/checker` | Row checks against sources, the judge, signed verdict and rows root |
-| `packages/merger` | Result table (CSV, Markdown, JSON) and the cited summary |
-| `packages/queues` | BullMQ queue names, defaults and deterministic row job ids |
-| `packages/x402` | Pay-per-request over HTTP: payment requirements, EIP-3009 facilitator, replay guard |
-| `packages/service` | Job lifecycle behind every interface: quote → fund → run → merge → seal → settle |
-| `packages/settlement` | Audit sampling, volume classification, the settlement-keeper, `/stats` |
-| `packages/live` | Live progress event schema, the in-process event bus, channel and tile-rate rules |
-| `packages/auth` | Passkey, email link, anonymous device, SIWE wallet sign-in, sessions, identity merge |
-| `packages/abuse` | Hashcash PoW, rate buckets, the free-tier task policy, ban escalation |
-| `packages/templates` | `defineTemplate`, the versioned registry, the v1 gallery |
-| `contracts` | Solidity (Foundry): escrow, row split, vault, forwarder, fees, burn, operators |
-| `apps/api` | REST /v1, x402 routes, tRPC, live SSE/WebSocket, `/stats`, agent-card and x402 discovery documents |
-| `apps/mcp` | The six `swarm_*` MCP tools, over stdio and streamable HTTP |
-| `apps/keeper` | Runs the settlement-keeper on an interval |
-| `apps/meter` | Runs the daily volume classifier |
-| `apps/intake` | Chat-first intake: drafts a job spec from plain words, with a bounded generator step |
-| `tools/copy-lint` | Fails the build on banned wording in user-facing strings |
-| `docs/day1.md` | Facts that must be verified before launch |
-| `docs/in-repo-core.md` | Pieces written here that the build doc expected to import |
+| Path | Purpose |
+| --- | --- |
+| `src/` | Root Vite + React frontend |
+| `backend/` | Standalone Bun + Express + PostgreSQL API |
+| `contracts/` | Foundry scaffold; no product contract behavior defined yet |
+| `.github/workflows/backend.yml` | Backend checks, GHCR publishing, GitHub release, optional Render deployment |
+| `legacy/` | Previous repository state retained under the same Git history |
 
-`programs/` is added in a later phase.
+## Run locally
 
-## Run it
+Requirements: Bun 1.4.5, PostgreSQL, and Foundry for contract work.
 
-Needs Bun 1.4+, pnpm 10, Node 22 and Docker.
-
-### Environment & Database Setup
-Copy `.env.example` to `.env`, set `MASTER_API_KEY` to a long random value, then set `DATABASE_URL` and `REDIS_URL`. Use the same master key in the API and trusted web proxy; do not put it in browser code. The API-specific variables are listed in `apps/api/.env.example`.
-GitHub Actions runs frontend, backend, and contract checks in the private deployment repository and the public mirror. The backend image publish and Render deploy hook run only from `NotADeveloper7/jellyswarm` on `main`.
-
-```bash
-pnpm install
-pnpm infra:up      # Postgres on 5433, Redis on 6380
-pnpm db:migrate
-pnpm check         # typecheck + copy lint + tests
+```sh
+cp .env.example .env
+bun install
+bun run dev
 ```
 
-Contracts need Foundry. The libraries are not committed:
+The Vite app runs on port 5173 and proxies `/api` to the backend at port 3001. In another terminal:
 
-```bash
-pnpm contracts:deps
-pnpm contracts:build
-pnpm contracts:test
+```sh
+cd backend
+cp .env.example .env
+bun install
+bun run dev
 ```
 
-After changing `packages/db/src/schema.ts`, run `pnpm db:generate` and commit
-the new migration.
+The API applies SQL migrations on startup. Set `DATABASE_URL` in `backend/.env` to a local PostgreSQL database.
 
-## Deployment
+## Checks
 
-The Bun web server serves the static site and proxies `/api/*` to `API_URL`, adding `MASTER_API_KEY` on the server side. Deploy `apps/web` to Vercel with **Root Directory** `apps/web` and **Framework Preset** `Container`; set `API_URL` and `MASTER_API_KEY` as server environment variables for Preview and Production. Its Dockerfile is scoped to that directory, which is also the Vercel build context.
+```sh
+# Frontend production build
+bun run build
 
-Deploy the API as a persistent container service (for example, Render), with `DATABASE_URL`, `REDIS_URL`, `MASTER_API_KEY`, `SIGNER_PRIVATE_KEY`, `OPEN_ROUTER_API_KEY` (or `MODEL_HOST_API_KEY`), and the selected chain RPC and escrow addresses. Configure the public API URL and web origin variables as well. The API rejects startup without a 32-character `MASTER_API_KEY`; `GET /health` is the sole public endpoint. Keep the web proxy and API keys identical.
+# Backend tests and typecheck
+cd backend
+bun test
+bun run check
 
-GitHub Actions checks run in `NotADeveloper7/jellyswarm` and `jellyswarm/jelly-swarm`. Only pushes to `main` in the private deployment repository publish the API image and trigger `RENDER_DEPLOY_HOOK_URL` when configured. Add that secret in the private repository's Actions settings.
+# Contract scaffold
+cd ../contracts
+forge install --no-git foundry-rs/forge-std
+forge build
+forge test
+```
 
-## Rules that tests enforce
+## Backend image and deployment
 
-- Money is integer micro-dollars (`bigint`), never a float.
-- At most 247 concurrent agents per job.
-- Fee split is fixed at 8000 / 1000 / 500 / 500 bps.
-- No email plaintext and no identity-document fields in the database.
-- User-facing strings live in copy files (`copy.ts`, `*.copy.ts`, `copy/`,
-  `templates/`) and pass the copy lint.
+The private repo's `main` workflow builds and publishes `ghcr.io/notadeveloper7/jellyswarm-backend` after tests pass, creates a GitHub release, then triggers Render if `RENDER_DEPLOY_HOOK_URL` is configured. The public repository runs backend checks but does not publish or deploy.
+
+After updating private `main`, run `python3 scripts/sync-public.py` to publish its history to the public repo with the `jellyswarm` commit identity. The mirror excludes `technical-docs/`.
+
+Configure `DATABASE_URL` and any future service secrets in the Render backend environment. The current health endpoint is `GET /health/`.
+
+## Current scope
+
+This is infrastructure scaffolding only: a Vite landing page, a health endpoint with a migration runner, and a minimal compile/test/deploy contract placeholder. No research jobs, payment flow, user accounts, or token behavior have been implemented in the new project.
+
+## License
+
+MIT. See [`LICENSE`](LICENSE).

@@ -1,27 +1,55 @@
-node_modules/
-.tsbuild/
-*.tsbuildinfo
-dist/
+# Local environment and credentials
 .env
 .env.*
 !.env.example
+**/.env
+**/.env.*
+!**/.env.example
+*.pem
+wallet.json
+
+# JavaScript / Bun
+node_modules/
+**/node_modules/
+dist/
+build/
 coverage/
-technical-docs/
+*.log
+*.local
+
+# Legacy repository outputs
+legacy/**/technical-docs/
+legacy/**/.tsbuild/
+legacy/**/*.tsbuildinfo
+legacy/**/CLAUDE.md
+legacy/**/AGENTS.md
+legacy/**/coverage/
+legacy/**/dist/
+legacy/**/contracts/out/
+legacy/**/contracts/cache/
+legacy/**/contracts/broadcast/
+legacy/**/contracts/lib/
+legacy/**/programs/**/target/
+legacy/**/.anchor/
+legacy/**/test-ledger/
+
+# Local agent instructions
+CLAUDE.md
+AGENTS.md
+
+# Anchor
+.anchor/
+test-ledger/
+programs/**/target/
 
 # Foundry
 contracts/out/
 contracts/cache/
 contracts/broadcast/
-
-# Anchor
-programs/**/target/
-.anchor/
-test-ledger/
-
-# Foundry libraries: run `pnpm contracts:deps`
 contracts/lib/
 
-# Local agent instructions (never commit or push)
-CLAUDE.md
-AGENTS.md
-
+# IDE / OS
+.DS_Store
+.vscode/
+.idea/
+.vercel/

@@ -1,27 +1,20 @@
 {
-  "name": "jelly-core",
+  "name": "jellyswarm",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@10.28.2",
-  "engines": {
-    "node": ">=22",
-    "bun": ">=1.4"
-  },
+  "description": "JellySwarm frontend scaffold",
   "scripts": {
-    "test": "bun test",
-    "typecheck": "tsc -b --pretty",
-    "lint:copy": "bun tools/copy-lint/cli.ts",
-    "infra:up": "docker compose up -d --wait",
-    "infra:down": "docker compose down",
-    "db:generate": "pnpm --filter @jelly/db generate",
-    "db:migrate": "pnpm --filter @jelly/db migrate",
-    "check": "pnpm typecheck && pnpm lint:copy && pnpm test",
-    "contracts:deps": "cd contracts && forge install --no-git foundry-rs/forge-std OpenZeppelin/openzeppelin-contracts@v5.1.0",
-    "contracts:build": "cd contracts && forge build",
-    "contracts:test": "cd contracts && forge test"
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "react": "latest",
+    "react-dom": "latest"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.4",
-    "typescript": "^7.0.2"
+    "@vitejs/plugin-react": "latest",
+    "vite": "latest"
   }
 }

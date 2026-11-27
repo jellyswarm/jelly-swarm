@@ -1,0 +1,26 @@
+node_modules/
+.tsbuild/
+*.tsbuildinfo
+dist/
+.env
+.env.*
+!.env.example
+coverage/
+technical-docs/
+
+# Foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+
+# Anchor
+programs/**/target/
+.anchor/
+test-ledger/
+
+# Foundry libraries: run `pnpm contracts:deps`
+contracts/lib/
+
+# Local agent instructions (never commit or push)
+CLAUDE.md
+AGENTS.md

@@ -1,0 +1,27 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap");
+
+:root { font-family: Manrope, sans-serif; color: #191a17; background: #f4f2ec; font-synthesis: none; text-rendering: optimizeLegibility; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+a { color: inherit; text-decoration: none; }
+.shell { min-height: 100vh; max-width: 1440px; margin: auto; padding: 0 7.1vw; display: flex; flex-direction: column; }
+.topbar { height: 94px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #deddd5; }
+.wordmark { display: inline-flex; gap: 11px; align-items: center; font-size: 16px; font-weight: 800; letter-spacing: -.06em; }
+.mark { width: 24px; height: 24px; display: flex; gap: 3px; align-items: center; justify-content: center; border-radius: 50%; background: #c0ef75; }
+.mark i { display: block; width: 3px; height: 9px; border-radius: 4px; background: #29321e; transform: rotate(18deg); }
+.mark i:nth-child(2) { height: 13px; transform: rotate(-8deg); }
+.mark i:nth-child(3) { height: 7px; transform: rotate(-22deg); }
+.status, .eyebrow, footer, .footnote { font-family: "DM Mono", monospace; text-transform: uppercase; letter-spacing: .08em; }
+.status { display: flex; align-items: center; gap: 9px; font-size: 10px; color: #73756c; }
+.status span { width: 7px; height: 7px; border-radius: 50%; background: #79a943; box-shadow: 0 0 0 3px #e5edd9; }
+.intro { width: min(730px, 100%); flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 80px 0 100px; }
+.eyebrow { margin: 0 0 28px; font-size: 10px; color: #7b7d73; }
+h1 { margin: 0; font-size: clamp(58px, 9vw, 112px); line-height: .99; letter-spacing: -.085em; font-weight: 600; }
+h1 em { color: #6f8c4d; font-style: normal; }
+.summary { max-width: 520px; margin: 31px 0 36px; color: #64665e; font-size: 16px; line-height: 1.8; }
+code { padding: 2px 6px; border-radius: 4px; background: #e8e6de; color: #3d4931; font: 12px "DM Mono", monospace; }
+.rule { width: 52px; height: 3px; background: #a5cc69; }
+.footnote { margin: 21px 0 0; font-size: 9px; line-height: 1.8; color: #8a8b83; }
+.footnote span { margin: 0 5px; }
+footer { height: 56px; display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #deddd5; color: #96978f; font-size: 9px; }
+@media (max-width: 600px) { .shell { padding: 0 24px; } .topbar { height: 72px; } .intro { padding: 70px 0 78px; } .summary { font-size: 14px; } footer { font-size: 8px; } }

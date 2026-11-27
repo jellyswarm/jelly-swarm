@@ -1,6 +1,7 @@
 import express from "express";
 import { timingSafeEqual } from "node:crypto";
 import { healthRouter } from "./routes/health";
+import { jobsRouter } from "./routes/jobs";
 
 export const app = express();
 app.disable("x-powered-by");
@@ -24,4 +25,9 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use("/jobs", jobsRouter);
 app.use((_req, res) => res.status(404).json({ error: "not_found" }));
+app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error("Unhandled API error", error);
+  res.status(500).json({ error: "internal_error" });
+});

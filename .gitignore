@@ -36,6 +36,7 @@ legacy/**/test-ledger/
 # Local agent instructions
 CLAUDE.md
 AGENTS.md
+our-progress.md
 
 # Anchor
 .anchor/

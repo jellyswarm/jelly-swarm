@@ -7,15 +7,16 @@
 ![Vite](https://img.shields.io/badge/Vite-8.x-646CFF?logo=vite&logoColor=white)
 ![Solidity](https://img.shields.io/badge/Solidity-Foundry-363636?logo=ethereum&logoColor=white)
 
-JellySwarm is being rebuilt from a clean scaffold. The previous project, including its code, docs, and assets, is preserved in [`legacy/`](legacy/). The product direction and new domain model are intentionally not carried forward as implementation requirements.
+JellySwarm lets a user give one job to as many as 247 independent AI agents. The agents work in parallel and a synthesis call returns one result. Jobs are paid upfront in USDC on Elysium and held in escrow until an operator-authorized settlement. The previous project is preserved in [`legacy/`](legacy/).
 
 ## Repository layout
 
 | Path | Purpose |
 | --- | --- |
-| `src/` | Root Vite + React frontend |
-| `backend/` | Standalone Bun + Express + PostgreSQL API |
-| `contracts/` | Foundry scaffold; no product contract behavior defined yet |
+| `src/` | Vite + React job submission and results UI |
+| `api/` | Vercel same-origin proxy; keeps `MASTER_API_KEY` server-side |
+| `backend/` | Bun + Express + PostgreSQL API and OpenRouter agent runner |
+| `contracts/` | Foundry USDC job escrow with treasury-signed EIP-712 settlements |
 | `.github/workflows/backend.yml` | Backend checks, GHCR publishing, GitHub release, optional Render deployment |
 | `legacy/` | Previous repository state retained under the same Git history |
 
@@ -29,7 +30,7 @@ bun install
 bun run dev
 ```
 
-The Vite app runs on port 5173 and proxies `/api` to the backend at port 3001. In another terminal:
+The Vite app runs on port 5173 and proxies `/api` to the backend at port 3001, adding the backend master key server-side from `backend/.env`. In another terminal:
 
 ```sh
 cd backend
@@ -38,7 +39,7 @@ bun install
 bun run dev
 ```
 
-The API applies SQL migrations on startup. Set `DATABASE_URL` in `backend/.env` to a local PostgreSQL database.
+The API applies SQL migrations on startup. Set `DATABASE_URL` in `backend/.env` to a local PostgreSQL database. Job quotes also require an Elysium RPC, the deployed escrow contract address, `PRICE_PER_AGENT_USDC`, `OPENROUTER_MODEL`, and the OpenRouter API key. The frontend never receives `MASTER_API_KEY`.
 
 ## Checks
 
@@ -51,7 +52,7 @@ cd backend
 bun test
 bun run check
 
-# Contract scaffold
+# Contracts
 cd ../contracts
 forge install --no-git foundry-rs/forge-std
 forge build
@@ -60,15 +61,17 @@ forge test
 
 ## Backend image and deployment
 
-The private repo's `main` workflow builds and publishes `ghcr.io/notadeveloper7/jellyswarm-backend` after tests pass, creates a GitHub release, then triggers Render if `RENDER_DEPLOY_HOOK_URL` is configured. The public repository runs backend checks but does not publish or deploy.
+The private repo's `main` workflow builds and publishes `ghcr.io/notadeveloper7/jellyswarm-backend` after tests pass, creates a GitHub release, then triggers Render if `RENDER_DEPLOY_HOOK_URL` is configured. The public repository runs backend checks but does not publish or deploy. Vercel needs `BACKEND_API_URL` and `MASTER_API_KEY` as server-side environment variables for its allowlisted `/api` proxy.
 
 After updating private `main`, run `python3 scripts/sync-public.py` to publish its history to the public repo with the `jellyswarm` commit identity. The mirror excludes `technical-docs/`.
 
 Configure `DATABASE_URL` and any future service secrets in the Render backend environment. The current health endpoint is `GET /health/`.
 
-## Current scope
+## Product/payment flow
 
-This is infrastructure scaffolding only: a Vite landing page, a health endpoint with a migration runner, and a minimal compile/test/deploy contract placeholder. No research jobs, payment flow, user accounts, or token behavior have been implemented in the new project.
+`POST /jobs` returns a custom x402 `exact-escrow` challenge or a direct USDC quote. The user approves USDC and calls `fundJob` on the escrow, paying HYPE gas. The backend verifies the funding event and runs up to 247 agents (20 concurrent provider calls at a time) plus a synthesis call. A treasury wallet signs the EIP-712 settlement decision, selecting the client share (100%, 70%, 50%, or 0%); anyone may submit that signed decision and pays their own gas.
+
+The escrow is not deployed yet. Configure the agreed per-model-call price and deployed contract address before accepting live jobs. Review the contract and exercise the full flow on Elysium testnet before mainnet deployment.
 
 ## License
 

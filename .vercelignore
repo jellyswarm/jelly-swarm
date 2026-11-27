@@ -1,0 +1,10 @@
+# Only the Vite site (src/, public/, index.html) and the /api proxy are deployed to Vercel.
+backend
+contracts
+legacy
+scripts
+apps
+packages
+tools
+*.yaml
+.github

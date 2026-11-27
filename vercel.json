@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "buildCommand": "vite build",
+  "outputDirectory": "dist",
+  "rewrites": [{ "source": "/((?!api/).*)", "destination": "/index.html" }],
+  "redirects": [
+    { "source": "/dashboard", "destination": "/app", "permanent": true },
+    { "source": "/dashboard.html", "destination": "/app", "permanent": true },
+    { "source": "/pages/agents", "destination": "/swarm", "permanent": true },
+    { "source": "/pages/:slug(how-it-works|system|roadmap|whitepaper)", "destination": "/:slug", "permanent": true }
+  ]
+}

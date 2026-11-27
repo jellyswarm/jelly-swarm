@@ -1,0 +1,63 @@
+// Server-side proxy rules shared by the Vercel function (api/[...path].js) and the local
+// dev server (dev-server.ts). The browser only ever calls same-origin /api/...; this code
+// adds the backend key on the server, so the key never reaches the page and no CORS is needed.
+
+const JOB_ID = "(?:0x)?[0-9a-fA-F]{64}";
+const JOB_PAYMENT = new RegExp(`^/jobs/${JOB_ID}/payment$`);
+const JOB_READ = new RegExp(`^/jobs/${JOB_ID}(?:/agents)?$`);
+
+/** Only job creation, payment verification and job reads are exposed. Never settlement or admin. */
+export function isAllowed(method, path) {
+  if (method === "POST" && path === "/jobs") return true;
+  if (method === "POST" && JOB_PAYMENT.test(path)) return true;
+  if (method === "GET" && JOB_READ.test(path)) return true;
+  return false;
+}
+
+/** "/api/jobs/0x.." -> "/jobs/0x..", or null if the path cannot be decoded. */
+export function backendPath(url) {
+  try {
+    return decodeURIComponent(new URL(url, "https://jellyswarm.invalid").pathname).replace(/^\/api(?=\/|$)/, "");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Forwards one allowed request to the backend.
+ * Returns { status, contentType, paymentRequired, body } for the caller to relay.
+ */
+export async function forward({ method, url, body, env = process.env }) {
+  const backendUrl = env.BACKEND_API_URL;
+  const apiKey = env.MASTER_API_KEY;
+  if (!backendUrl || !apiKey) return json(503, { error: "backend_proxy_not_configured" });
+
+  const path = backendPath(url);
+  if (path === null) return json(400, { error: "invalid_path" });
+  if (!isAllowed(method, path)) return json(404, { error: "not_found" });
+
+  const target = new URL(path, backendUrl);
+  target.search = new URL(url, "https://jellyswarm.invalid").search;
+  const headers = { "x-api-key": apiKey, accept: "application/json" };
+  let payload;
+  if (method !== "GET") {
+    headers["content-type"] = "application/json";
+    payload = JSON.stringify(body ?? {});
+  }
+
+  try {
+    const upstream = await fetch(target, { method, headers, body: payload });
+    return {
+      status: upstream.status,
+      contentType: upstream.headers.get("content-type") ?? "application/json",
+      paymentRequired: upstream.headers.get("payment-required"),
+      body: await upstream.text(),
+    };
+  } catch {
+    return json(502, { error: "backend_unavailable" });
+  }
+}
+
+function json(status, value) {
+  return { status, contentType: "application/json", paymentRequired: null, body: JSON.stringify(value) };
+}

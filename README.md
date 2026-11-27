@@ -2,9 +2,9 @@
 
 [![Backend CI](https://github.com/jellyswarm/jelly-swarm/actions/workflows/backend.yml/badge.svg)](https://github.com/jellyswarm/jelly-swarm/actions/workflows/backend.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Vite](https://img.shields.io/badge/Vite-8.x-646CFF?logo=vite&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)
 ![Bun](https://img.shields.io/badge/Bun-1.4.5-000000?logo=bun&logoColor=white)
-![Vite](https://img.shields.io/badge/Vite-8.x-646CFF?logo=vite&logoColor=white)
 ![Solidity](https://img.shields.io/badge/Solidity-Foundry-363636?logo=ethereum&logoColor=white)
 
 JellySwarm lets a user give one job to as many as 247 independent AI agents. The agents work in parallel and a synthesis call returns one result. Jobs are paid upfront in USDC on Elysium into the escrow wallet. The previous project is preserved in [`legacy/`](legacy/).
@@ -13,8 +13,9 @@ JellySwarm lets a user give one job to as many as 247 independent AI agents. The
 
 | Path | Purpose |
 | --- | --- |
-| `src/` | Vite + React job submission and results UI |
-| `api/` | Vercel same-origin proxy; keeps `MASTER_API_KEY` server-side |
+| `src/` | React + Vite: marketing pages (`src/site`) and the job app at `/app` (`src/app`, RainbowKit + wagmi) |
+| `public/media/` | Brand images and mascot cutouts |
+| `api/` | Same-origin `/api` proxy rules (`_proxy.js`), used by the Vercel function and the Vite dev server; keeps `MASTER_API_KEY` server-side |
 | `backend/` | Bun + Express + PostgreSQL API and OpenRouter agent runner |
 | `contracts/` | Foundry scaffold; payments currently use the configured escrow EOA wallet |
 | `.github/workflows/backend.yml` | Public-repo backend checks, GHCR publishing, GitHub release, optional Render deployment |
@@ -30,7 +31,7 @@ bun install
 bun run dev
 ```
 
-The Vite app runs on port 5173 and proxies `/api` to the backend at port 3001, adding the backend master key server-side from `backend/.env`. In another terminal:
+The site runs on http://localhost:5173. The Vite dev server proxies `/api` to `BACKEND_API_URL` with the same allowlist as production, adding `MASTER_API_KEY` from the root `.env` on the server. `VITE_WALLETCONNECT_PROJECT_ID` (optional, public) enables mobile and QR wallets in RainbowKit. Point `BACKEND_API_URL` at production (`https://api.jellyswarm.app`) or at a local backend (`http://localhost:3001`). To run the backend locally, use another terminal:
 
 ```sh
 cd backend
@@ -44,8 +45,8 @@ The API applies SQL migrations on startup. Set `DATABASE_URL` in `backend/.env` 
 ## Checks
 
 ```sh
-# Frontend production build
-bun run build
+# Frontend: production build and /api proxy tests
+bun run check
 
 # Backend tests and typecheck
 cd backend

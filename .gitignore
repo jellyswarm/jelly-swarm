@@ -57,3 +57,12 @@ contracts/lib/
 .vscode/
 .idea/
 .vercel/
+
+# Handoff notes never get committed or published
+**/*handoff*
+**/*HANDOFF*
+**/*Handoff*
+/FRONTEND.md
+
+# Vite build output
+dist/

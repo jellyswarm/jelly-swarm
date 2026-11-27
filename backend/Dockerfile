@@ -8,6 +8,7 @@ RUN bun install --frozen-lockfile --production --ignore-scripts
 FROM base AS runner
 ENV NODE_ENV=production
 ARG APP_COMMIT_SHA=unknown
+ENV APP_COMMIT_SHA=${APP_COMMIT_SHA}
 ENV APP_VERSION=${APP_COMMIT_SHA}
 LABEL org.opencontainers.image.source="https://github.com/NotADeveloper7/jellyswarm"
 LABEL org.opencontainers.image.revision=${APP_COMMIT_SHA}

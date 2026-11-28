@@ -84,6 +84,13 @@ export function getChainClient() {
   return createPublicClient({ chain: getChainConfig(), transport: getTransport() });
 }
 
+export async function getRecommendedGasPrice(): Promise<bigint> {
+  const client = getChainClient();
+  const [networkGasPrice, block] = await Promise.all([client.getGasPrice(), client.getBlock({ blockTag: "latest" })]);
+  const baseFeeFloor = block.baseFeePerGas ? block.baseFeePerGas * 125n / 100n + 1n : 0n;
+  return networkGasPrice > baseFeeFloor ? networkGasPrice : baseFeeFloor;
+}
+
 export function getPaymentConfig() {
   const escrowPublicKey = process.env.ESCROW_PUBLIC_KEY;
   const usdcAddress = process.env.ELYSIUM_USDC_ADDRESS;
@@ -201,7 +208,7 @@ export async function prepareEscrowTransfer(to: Address, amount: bigint, nonce: 
   const data = encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [to, amount] });
   const [gas, gasPrice] = await Promise.all([
     client.estimateGas({ account: account.address, to: usdc, data }),
-    gasPriceOverride ? Promise.resolve(gasPriceOverride) : client.getGasPrice(),
+    gasPriceOverride ? Promise.resolve(gasPriceOverride) : getRecommendedGasPrice(),
   ]);
   const serializedTransaction = await account.signTransaction({
     chainId: chain.id,

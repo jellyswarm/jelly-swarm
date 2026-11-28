@@ -1,6 +1,6 @@
 import type { Address, Hash } from "viem";
 import { pool } from "../db";
-import { broadcastEscrowTransfer, getChainClient, getPaymentConfig, prepareEscrowTransfer } from "./chain";
+import { broadcastEscrowTransfer, getChainClient, getPaymentConfig, getRecommendedGasPrice, prepareEscrowTransfer } from "./chain";
 
 type PayoutJob = {
   client_address: string;
@@ -22,14 +22,29 @@ type PayoutIntent = {
   replaced_hashes: string[];
   replacement_count: number;
   broadcast_at: Date | null;
+  created_at: Date;
 };
 
 const nonceLock = "jellyswarm:escrow-payout-nonce";
 const scheduledPayouts = new Map<string, Promise<void>>();
 
-function safeErrorCode(error: unknown): string {
+function payoutErrorCode(error: unknown): string {
+  const detail = error instanceof Error
+    ? String((error as Error & { details?: string }).details ?? error.message).toLowerCase()
+    : "";
+  if (detail.includes("max fee per gas less than block base fee")) return "gas_price_below_base_fee";
+  if (detail.includes("insufficient funds")) return "escrow_gas_balance_low";
+  if (detail.includes("nonce too low")) return "payout_nonce_already_used";
+  if (detail.includes("replacement transaction underpriced")) return "replacement_underpriced";
+  if (detail.includes("transaction reverted")) return "payout_transaction_reverted";
   const message = error instanceof Error ? error.message : "";
-  return /^[a-zA-Z0-9_:-]{1,80}$/.test(message) ? message : "unexpected_error";
+  return /^[a-zA-Z0-9_:-]{1,80}$/.test(message) ? message : "payout_broadcast_failed";
+}
+
+function payoutErrorDetail(error: unknown): string {
+  if (!(error instanceof Error)) return "unknown_error";
+  const detail = String((error as Error & { details?: string; shortMessage?: string }).details ?? (error as Error & { shortMessage?: string }).shortMessage ?? error.message);
+  return detail.replace(/0x[\da-fA-F]{100,}/g, "[signed transaction omitted]").replace(/[\r\n\t]+/g, " ").slice(0, 240);
 }
 
 async function lockJob(jobId: string, run: () => Promise<{ status: string; transactions: string[] }>) {
@@ -60,7 +75,7 @@ async function persistSignedIntent(jobId: string, kind: "client" | "treasury", r
     await lockConnection.query("BEGIN");
     const found = await lockConnection.query<PayoutIntent>(
       `SELECT recipient, amount_base_units, status, nonce, raw_transaction, transaction_hash
-              , gas_price, replaced_hashes, replacement_count, broadcast_at
+              , gas_price, replaced_hashes, replacement_count, broadcast_at, created_at
        FROM swarm_payouts WHERE job_id = $1 AND kind = $2 FOR UPDATE`,
       [jobId, kind],
     );
@@ -92,7 +107,7 @@ async function persistSignedIntent(jobId: string, kind: "client" | "treasury", r
     await lockConnection.query("COMMIT");
     const latest = await lockConnection.query<PayoutIntent>(
       `SELECT recipient, amount_base_units, status, nonce, raw_transaction, transaction_hash,
-              gas_price, replaced_hashes, replacement_count, broadcast_at
+              gas_price, replaced_hashes, replacement_count, broadcast_at, created_at
        FROM swarm_payouts WHERE job_id = $1 AND kind = $2`,
       [jobId, kind],
     );
@@ -117,17 +132,22 @@ async function replaceStuckIntent(jobId: string, kind: "client" | "treasury"): P
     await connection.query("BEGIN");
     const result = await connection.query<PayoutIntent>(
       `SELECT recipient, amount_base_units, status, nonce, raw_transaction, transaction_hash,
-              gas_price, replaced_hashes, replacement_count, broadcast_at
+              gas_price, replaced_hashes, replacement_count, broadcast_at, created_at
        FROM swarm_payouts WHERE job_id = $1 AND kind = $2 FOR UPDATE`,
       [jobId, kind],
     );
     const current = result.rows[0];
-    if (!current || !current.nonce || !current.gas_price || !current.broadcast_at || current.replacement_count >= 2 ||
-        Date.now() - current.broadcast_at.getTime() < 120_000) {
+    if (!current || current.nonce === null || !current.gas_price || current.replacement_count >= 2) {
       await connection.query("ROLLBACK");
       return null;
     }
-    const networkGasPrice = await getChainClient().getGasPrice();
+    const submittedAt = current.broadcast_at?.getTime() ?? current.created_at.getTime();
+    const retryDelayMs = current.broadcast_at ? 120_000 : 30_000;
+    if (Date.now() - submittedAt < retryDelayMs) {
+      await connection.query("ROLLBACK");
+      return null;
+    }
+    const networkGasPrice = await getRecommendedGasPrice();
     const previousGasPrice = BigInt(current.gas_price);
     const bumpedGasPrice = previousGasPrice * 125n / 100n + 1n;
     const prepared = await prepareEscrowTransfer(
@@ -139,7 +159,7 @@ async function replaceStuckIntent(jobId: string, kind: "client" | "treasury"): P
     await connection.query(
       `UPDATE swarm_payouts SET replaced_hashes = array_append(replaced_hashes, transaction_hash),
               raw_transaction = $3, transaction_hash = $4, gas_price = $5,
-              replacement_count = replacement_count + 1, status = 'prepared', broadcast_at = NULL,
+              replacement_count = replacement_count + 1, status = 'prepared', broadcast_at = NULL, error_code = NULL,
               attempt_count = attempt_count + 1, updated_at = now()
        WHERE job_id = $1 AND kind = $2`,
       [jobId, kind, prepared.serializedTransaction, prepared.hash, prepared.gasPrice.toString()],
@@ -148,7 +168,7 @@ async function replaceStuckIntent(jobId: string, kind: "client" | "treasury"): P
     await connection.query("COMMIT");
     const latest = await connection.query<PayoutIntent>(
       `SELECT recipient, amount_base_units, status, nonce, raw_transaction, transaction_hash,
-              gas_price, replaced_hashes, replacement_count, broadcast_at
+              gas_price, replaced_hashes, replacement_count, broadcast_at, created_at
        FROM swarm_payouts WHERE job_id = $1 AND kind = $2`,
       [jobId, kind],
     );
@@ -213,12 +233,14 @@ async function trackedTransferInternal(
       const broadcastHash = await broadcastEscrowTransfer(activeIntent.raw_transaction as `0x${string}`);
       if (broadcastHash.toLowerCase() !== activeIntent.transaction_hash?.toLowerCase()) throw new Error("payout_transaction_hash_mismatch");
       await pool.query(
-        "UPDATE swarm_payouts SET status = 'broadcast', broadcast_at = COALESCE(broadcast_at, now()), updated_at = now() WHERE job_id = $1 AND kind = $2 AND status <> 'confirmed'",
+        "UPDATE swarm_payouts SET status = 'broadcast', error_code = NULL, broadcast_at = COALESCE(broadcast_at, now()), updated_at = now() WHERE job_id = $1 AND kind = $2 AND status <> 'confirmed'",
         [jobId, kind],
       );
     } catch (error) {
       if (error instanceof Error && error.message === "payout_transaction_hash_mismatch") throw error;
-      // A repeated raw transaction is safe: it has the same nonce and hash as the saved intent.
+      const message = error instanceof Error ? error.message.toLowerCase() : "";
+      const alreadySubmitted = message.includes("already known") || message.includes("known transaction") || message.includes("already imported");
+      if (!alreadySubmitted) throw error;
     }
   }
 
@@ -254,11 +276,17 @@ async function trackedTransfer(
   try {
     return await trackedTransferInternal(jobId, kind, recipient, amount, existingHash);
   } catch (error) {
+    const errorCode = payoutErrorCode(error);
+    await pool.query(
+      "UPDATE swarm_payouts SET error_code = $3, updated_at = now() WHERE job_id = $1 AND kind = $2 AND status <> 'confirmed'",
+      [jobId, kind, errorCode],
+    ).catch(() => {});
     console.error(JSON.stringify({
       event: "payout_transfer_failed",
       jobId,
       kind,
-      errorCode: safeErrorCode(error),
+      errorCode,
+      detail: payoutErrorDetail(error),
       errorType: error instanceof Error ? error.name : "unknown_error",
     }));
     throw error;
@@ -332,7 +360,7 @@ export function schedulePayoutRecovery(jobId: string, status: "payout_pending" |
       console.info(JSON.stringify({ event: "payout_recovery_finished", jobId, status: result.status }));
     })
     .catch((error: unknown) => {
-      console.error(JSON.stringify({ event: "payout_recovery_pending", jobId, errorCode: safeErrorCode(error) }));
+      console.error(JSON.stringify({ event: "payout_recovery_pending", jobId, errorCode: payoutErrorCode(error), detail: payoutErrorDetail(error) }));
     })
     .finally(() => scheduledPayouts.delete(jobId));
   scheduledPayouts.set(jobId, attempt);

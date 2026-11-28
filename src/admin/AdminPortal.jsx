@@ -230,11 +230,14 @@ function AdminPortal() {
 
   const statusCards = useMemo(() => [
     ["Running", ["queued", "running"]],
+    ["Awaiting payment", ["payment_pending"]],
     ["Needs review", ["failed"]],
     ["Payout pending", ["payout_pending", "settlement_pending"]],
     ["Settled", ["settled"]],
   ].map(([label, statuses]) => [label, statuses.reduce((sum, status) => sum + (summary?.statuses?.[status]?.count || 0), 0)])
-    .concat([["Stuck 15m+", summary?.stuckCount || 0]]), [summary]);
+    .concat([["Stalled work", summary?.stuckCount || 0]]), [summary]);
+
+  const jobStatusLabel = (status) => status === "payment_pending" ? "awaiting payment" : status.replaceAll("_", " ");
 
   if (checkingSession) return <main className="admin-lock"><AdminModal dialog={{ kind: "loading", title: "Checking admin session", message: "Securely checking for an active session." }} /></main>;
 
@@ -274,13 +277,13 @@ function AdminPortal() {
                   <button className="admin-quiet" type="submit">Search</button>
                 </form>
                 <select value={filter} onChange={(event) => { setFilter(event.target.value); void loadDashboard(event.target.value, appliedSearch); }} aria-label="Filter jobs">
-                  <option value="stuck">Stuck · needs attention</option><option value="failed">Failed · resolve dispute</option><option value="settlement_pending">Refund pending</option><option value="payout_pending">Payout pending</option><option value="running">Running</option><option value="queued">Queued</option><option value="settled">Settled</option><option value="all">All jobs</option>
+                  <option value="stuck">Stalled work · needs attention</option><option value="payment_pending">Awaiting payment</option><option value="failed">Failed · resolve dispute</option><option value="settlement_pending">Refund pending</option><option value="payout_pending">Payout pending</option><option value="running">Running</option><option value="queued">Queued</option><option value="settled">Settled</option><option value="all">All jobs</option>
                 </select>
               </div>
             </div>
             <div className="admin-job-list">
               {jobs.map((job) => <button className={`admin-job${selected?.id === job.id ? " selected" : ""}`} type="button" key={job.id} onClick={() => void openJob(job)}>
-                <span className="admin-job-main"><strong>{job.status.replaceAll("_", " ")}{job.isStuck ? " · stuck" : ""}</strong><code>{short(job.id, 10, 8)}</code><span>{job.agentCount} agents · {formatUsdc(job.amountBaseUnits)} USDC</span></span>
+                <span className="admin-job-main"><strong>{jobStatusLabel(job.status)}{job.isStuck ? " · stalled" : ""}</strong><code>{short(job.id, 10, 8)}</code><span>{job.agentCount} agents · {formatUsdc(job.amountBaseUnits)} USDC</span></span>
                 <span className="admin-job-date">{new Date(job.createdAt).toLocaleString()}</span>
               </button>)}
               {!jobs.length && <div className="admin-empty">No jobs in this view.</div>}
@@ -290,7 +293,7 @@ function AdminPortal() {
           <section className="admin-panel admin-detail">
             {!selected && <div className="admin-empty admin-detail-empty"><span className="admin-kicker">JOB DETAIL</span><h2>Select a job</h2><p>Payment, result, agent, and payout details will appear here.</p></div>}
             {detail && <>
-              <div className="admin-panel-head"><div><span className="admin-kicker">JOB DETAIL</span><h2>{detail.job.status.replaceAll("_", " ")}</h2></div><code>{short(detail.job.id, 10, 8)}</code></div>
+              <div className="admin-panel-head"><div><span className="admin-kicker">JOB DETAIL</span><h2>{jobStatusLabel(detail.job.status)}</h2></div><code>{short(detail.job.id, 10, 8)}</code></div>
               <dl className="admin-facts"><div><dt>Client</dt><dd><code>{detail.job.clientAddress}</code></dd></div><div><dt>Workers</dt><dd>{detail.job.successfulAgentCount ?? 0} / {detail.job.agentCount}</dd></div><div><dt>Paid</dt><dd>{formatUsdc(detail.job.amountBaseUnits)} USDC</dd></div><div><dt>Automatic refund</dt><dd>{formatUsdc(detail.job.automaticRefundBaseUnits)} USDC</dd></div><div><dt>Created</dt><dd>{new Date(detail.job.createdAt).toLocaleString()}</dd></div></dl>
               <div className="admin-task"><b>Task</b><p>{detail.job.task}</p></div>
               {detail.job.errorCode && <div className="admin-task"><b>Failure reason</b><p>{detail.job.errorCode}</p></div>}

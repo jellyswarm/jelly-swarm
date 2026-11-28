@@ -30,7 +30,6 @@ const jobIdPattern = /^(?:0x)?[\da-fA-F]{64}$/;
 const stuckJobSql = `(
   (status IN ('queued', 'running', 'payout_pending', 'settlement_pending') AND updated_at < now() - interval '15 minutes')
   OR (status = 'running' AND (lease_expires_at IS NULL OR lease_expires_at < now()))
-  OR (status = 'payment_pending' AND created_at < now() - interval '30 minutes')
 )`;
 
 function adminError(res: Response, status: number, error: string): void {

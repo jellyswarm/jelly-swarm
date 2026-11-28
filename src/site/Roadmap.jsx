@@ -5,26 +5,26 @@ import { Words } from "./Words.jsx";
 const PHASES = [
   [
     "NOW",
-    "Live on Elysium",
+    "What is in the app today",
     [
-      ["live", "Shipped", "Paid swarm jobs", "Up to 247 agents per task, one synthesis step, 0.30 USDC per agent. Paid with one USDC transfer on Elysium and verified on chain."],
-      ["live", "Shipped", "The JellySwarm app", "Quotes, wallet payments through any EVM wallet, live agent progress, answers with every finding, and a job history in your browser."],
+      ["live", "Live", "Paid jobs on Elysium", "Choose 1–247 workers, see the exact quote at 0.30 USDC per worker, and pay with USDC from your wallet. You supply HYPE for gas."],
+      ["live", "Live", "Parallel work and results", "Workers run in parallel batches; the app shows job progress and returns a synthesized answer alongside successful worker findings."],
     ],
   ],
   [
-    "MONTH 01",
-    "Make the swarm easier to reach",
+    "MONTH 01 · DEC 2026",
+    "Get more useful work from every model call",
     [
-      ["next", "Weeks 1–2", "Accounts and shareable results", "Sign in to keep your jobs across devices, and share an answer with a link, kept private until you choose otherwise."],
-      ["planned", "Weeks 3–4", "Public API and MCP tool", "Let apps and AI clients such as Claude, ChatGPT and Cursor quote and run swarm jobs, with payment still signed by the user's own wallet."],
+      ["next", "Weeks 1–2", "Model quality and cost bench", "Build a repeatable evaluation set and compare candidate OpenRouter models on answer quality, latency, reliability, and cost. Use the results to choose a better default without guessing from model names."],
+      ["planned", "Weeks 3–4", "Task-aware model routing", "Route work to a low-cost fast model by default and reserve stronger models for tasks that benefit from them. Keep the customer quote clear and track provider spend per job."],
     ],
   ],
   [
-    "MONTH 02",
-    "Make every answer easier to trust",
+    "MONTH 02 · JAN 2027",
+    "Make the swarm faster and its answer easier to judge",
     [
-      ["planned", "Weeks 5–6", "Checked findings", "Add a checking pass from a different model family that reviews each agent's work before the synthesis, so weak findings are flagged, not blended in."],
-      ["planned", "Weeks 7–8", "On-chain escrow", "Move job payments from the escrow wallet into an audited escrow contract on Elysium, with a refund anyone can trigger if a job never finishes."],
+      ["planned", "Weeks 5–6", "Less duplicated swarm work", "Give workers complementary roles, split broad tasks into focused sub-questions, and tune concurrency to provider limits. Reuse completed work on retries and surface progress as it arrives."],
+      ["planned", "Weeks 7–8", "A review pass and usable exports", "Add a critic pass that flags unsupported claims and unresolved disagreements before synthesis. Let people copy or export the final answer together with the worker findings."],
     ],
   ],
 ];
@@ -37,7 +37,7 @@ export default function Roadmap() {
         eyebrow="JELLYSWARM · ROADMAP"
         title={<>Bigger swarms.<br /><em>More trust.</em></>}
         lede="Over the next two months, we plan to make the swarm easier to reach from anywhere, and its answers easier to trust."
-        aside="2-MONTH PLAN · 8 WEEKS"
+        aside="DEC 2026 – JAN 2027 · 8 WEEKS"
         jelly="jelly-mint.png"
       />
 
@@ -45,10 +45,11 @@ export default function Roadmap() {
         <div className="ed-inner rm-intro">
           <span className="eyebrow">The focus</span>
           <p>
-            First, bring the swarm to more places: accounts, share links, a public API and an MCP tool. Then raise the bar on
-            every answer with checked findings and an escrow contract you can verify.
+            We will first measure which models give us the best quality, speed and cost for real JellySwarm tasks. Then we will
+            improve routing and divide work so agents cover more ground with less repetition, before adding a review pass and
+            better ways to keep and share results.
           </p>
-          <span className="rm-note">Planned sequence. Scope and timing may change as we build and as you tell us what you need.</span>
+            <span className="rm-note">Planned sequence, not a delivery guarantee. We will adjust scope as evaluation results and user feedback come in.</span>
         </div>
       </section>
 
@@ -83,16 +84,16 @@ export default function Roadmap() {
           <span className="eyebrow">What this enables</span>
           <div className="outcomes">
             <article>
-              <span>Reach</span>
-              <p>Run a swarm from the app, your own product, or straight from your AI assistant.</p>
+              <span>Quality per dollar</span>
+              <p>Choose models by measured task quality, speed and provider cost instead of relying on a single default.</p>
             </article>
             <article>
-              <span>Trust</span>
-              <p>Findings checked by a different model family before they shape the answer.</p>
+              <span>Useful parallelism</span>
+              <p>Give workers complementary jobs, reduce repeated effort, and recover work without starting over.</p>
             </article>
             <article>
-              <span>Custody</span>
-              <p>Payments held by a contract with rules you can read, not by a wallet you have to trust.</p>
+              <span>Clearer answers</span>
+              <p>Keep disagreements visible, flag weak support, and take the result and findings with you.</p>
             </article>
           </div>
         </div>

@@ -17,10 +17,10 @@ function Split({ eyebrow, title, children }) {
 }
 
 const PRINCIPLES = [
-  ["Independent takes", "Agents don't see each other's work, so agreement means something and disagreement is visible."],
+  ["Parallel exploration", "Workers approach the same task separately, so the result can preserve useful differences instead of hiding them."],
   ["Price before work", "Every job is quoted up front at 0.30 USDC per agent, synthesis included. Nothing runs until you pay."],
-  ["Your wallet signs", "Payment is one USDC transfer you approve yourself. JellySwarm never receives your keys or asks for approvals."],
-  ["Show the working", "The answer comes with every agent's finding, so you can see how it was reached and where it might be weak."],
+  ["Wallet-controlled payment", "You approve one USDC transfer and sign a gas-free claim that binds it to your job. JellySwarm never receives your keys or asks for token approvals."],
+  ["Show the working", "The answer comes with each successful agent's finding, so you can see the basis for the synthesis and where it may be weak."],
 ];
 
 export default function Whitepaper() {
@@ -29,7 +29,7 @@ export default function Whitepaper() {
       <PaperHero
         eyebrow="JELLYSWARM · WHITEPAPER"
         title={<>Many takes.<br /><em>One answer.</em></>}
-        lede="JellySwarm gives one task to up to 247 independent AI agents and brings their findings together into one answer, paid in USDC on Elysium."
+        lede="JellySwarm turns one task into parallel AI work: up to 247 workers contribute separate findings, then a synthesis step brings them into one answer. Jobs are paid in USDC on Elysium."
         aside="VERSION 1.0 · NOVEMBER 2026"
         jelly="jelly-cube.png"
       />
@@ -38,11 +38,17 @@ export default function Whitepaper() {
         <div className="ed-inner ed-thesis">
           <span className="eyebrow">The thesis</span>
           <div>
-            <Words>One model gives you one guess. A swarm shows you the range.</Words>
+            <Words>Hard questions deserve more than one pass.</Words>
             <p>
-              Ask a single AI a hard question and you get one confident answer, with no sense of how settled it is. Ask many
-              independent agents and patterns appear: where they agree, where they split, and what only a few noticed.
-              JellySwarm runs that swarm for you, prices it up front, and turns it into one answer without hiding the working.
+              Most AI products give a task to one model call and return one polished answer. That is fast, but it can conceal
+              missed angles and uncertainty. JellySwarm's thesis is to make useful work parallel: collect separate attempts,
+              keep their findings visible, and synthesize them without pretending agreement means certainty.
+            </p>
+            <p>
+              The product is an orchestration layer around that process. You choose the size of the swarm, see the full price
+              before work starts, pay from your own wallet, and receive both a consolidated answer and the findings behind it.
+              More workers are useful only when the system can coordinate them efficiently and make their output easier to judge;
+              improving that balance is the work ahead.
             </p>
           </div>
         </div>
@@ -50,12 +56,14 @@ export default function Whitepaper() {
 
       <Split eyebrow="01 — The product" title={<>A whole team,<br />sized to the question.</>}>
         <p>
-          You describe a task and choose how many agents work on it, from 1 to 247. Every agent receives the same task and
-          answers it independently. A synthesis step then reads all of their findings and writes one clear answer.
+          You describe a task and choose how many agents work on it, from 1 to 247. In the current system, each worker receives
+          the task separately and is asked to make a distinct contribution. A synthesis step reads the successful findings and
+          writes one clear answer.
         </p>
         <p>
-          The synthesis keeps useful disagreements and uncertainty, and it is instructed not to add claims the agents didn't
-          make. Every individual finding stays available, so you can check the answer against the work behind it.
+          The synthesis is instructed to retain useful disagreements and uncertainty, and not to add unsupported claims.
+          Individual findings stay available. Today, workers use the configured model and their outputs are not independently
+          verified against external sources, so the swarm helps explore a question; it does not guarantee correctness.
         </p>
       </Split>
 
@@ -79,8 +87,8 @@ export default function Whitepaper() {
             <b>Pay.</b> Your wallet sends that USDC to the escrow address on Elysium. You pay the gas in HYPE.
           </li>
           <li>
-            <b>Verify.</b> After two confirmations, the backend checks the transfer's token, sender, recipient and exact amount
-            before anything runs.
+            <b>Bind and verify.</b> You sign a gas-free typed-data claim tying the transaction to this job. After two
+            confirmations, the backend checks the token, sender, recipient, exact amount and quote time before anything runs.
           </li>
           <li>
             <b>Work.</b> The agents run in parallel batches. Each one's status is visible as it finishes.
@@ -99,18 +107,20 @@ export default function Whitepaper() {
           <span className="eyebrow">03 — Payments and custody</span>
           <Words>Your keys stay yours. Your payment is held in escrow.</Words>
           <p>
-            Connecting a wallet shares only your public address. Each job needs exactly one transfer that you approve, and
-            JellySwarm never asks for token approvals or signatures beyond it.
+            Connecting a wallet shares only your public address. Each job needs one USDC transfer that you approve, plus a
+            gas-free typed-data signature so the backend can verify that the payment belongs to this job. JellySwarm never asks
+            for token approvals or your private key.
           </p>
           <p>
-            Today, payments are held by JellySwarm's escrow wallet. When a job succeeds, the payment moves to the treasury. When a
-            job fails, the team reviews it and returns 100%, 70% or 50% of the payment to your wallet, with the rest going to the
-            treasury. Moving custody into an audited escrow contract, with a refund anyone can trigger, is on the roadmap.
+            Today, payments are held by JellySwarm's EOA escrow wallet, so custody depends on the security of that wallet. When a
+            job succeeds, proceeds go to the treasury. If some agents fail but enough work completes, their share is refunded
+            automatically; jobs below the success threshold go to operator review. For reviewed settlements, an authorized
+            operator decision must be signed by the treasury wallet and can return 100%, 70% or 50% to the client.
           </p>
         </div>
       </section>
 
-      <Split eyebrow="04 — The network" title={<>Built on Elysium,<br />Hyperliquid's L2.</>}>
+      <Split eyebrow="04 — The network" title={<>Built on Elysium,<br />by Kinetiq.</>}>
         <p>
           JellySwarm runs on Elysium mainnet (chain ID 99901). Jobs are priced and paid in USDC, and gas is paid in HYPE. The
           app connects through RainbowKit, so you can use the EVM wallet you already have.
@@ -130,8 +140,8 @@ export default function Whitepaper() {
           <b>It is not advice.</b> JellySwarm is a research tool. It never trades, and nothing it writes is financial advice.
         </p>
         <p>
-          <b>Refunds are reviewed.</b> Failed jobs are refunded by a team decision today, not automatically by a contract. That
-          changes with the on-chain escrow on the roadmap.
+          <b>Custody is centralized today.</b> The escrow is a wallet, not a smart contract. The treasury/operator key controls
+          settlement decisions and the escrow wallet executes transfers.
         </p>
         <p>
           <b>Agents run in batches.</b> A 247-agent job runs in parallel batches, so larger swarms take longer to finish.
@@ -141,7 +151,7 @@ export default function Whitepaper() {
       <EdOutro
         eyebrow="The next chapter"
         title={<>Easier to reach.<br /><em>Easier to trust.</em></>}
-        lede="Accounts, a public API and MCP tool, checked findings and an on-chain escrow are next."
+        lede="The next work focuses on better model routing, less duplicated agent work, and answers that are easier to evaluate."
         to="/roadmap"
         label="Read the roadmap"
         jelly="jelly-mint.png"

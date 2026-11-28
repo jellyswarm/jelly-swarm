@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { RainbowKitProvider, ConnectButton } from "@rainbow-me/rainbowkit";
-import { WagmiProvider } from "wagmi";
-import { getAccount, signTypedData } from "wagmi/actions";
+import { RainbowKitProvider, ConnectButton, useConnectModal } from "@rainbow-me/rainbowkit";
+import { WagmiProvider, useAccount, useSwitchChain } from "wagmi";
+import { signTypedData } from "wagmi/actions";
 import { config, elysium, rkTheme } from "../app/wallet.js";
 import { formatUsdc, short } from "../app/lib.js";
 import "../styles/site.css";
@@ -41,20 +41,23 @@ function AdminPortal() {
   const [summary, setSummary] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [filter, setFilter] = useState("failed");
+  const [search, setSearch] = useState("");
   const [selected, setSelected] = useState(null);
   const [detail, setDetail] = useState(null);
   const [treasury, setTreasury] = useState("");
   const [shareBps, setShareBps] = useState(7_000);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
-  const account = getAccount(config);
+  const account = useAccount();
+  const { openConnectModal } = useConnectModal();
+  const { switchChain } = useSwitchChain();
 
-  const loadDashboard = useCallback(async (status = filter) => {
+  const loadDashboard = useCallback(async (status = "failed", query = "") => {
     setError("");
     try {
       const [overview, list] = await Promise.all([
         adminApi("/summary"),
-        adminApi(`/jobs?status=${encodeURIComponent(status)}&limit=100`),
+        adminApi(`/jobs?status=${encodeURIComponent(status)}&q=${encodeURIComponent(query)}&limit=100`),
       ]);
       setSummary(overview);
       setJobs(list.jobs || []);
@@ -64,7 +67,7 @@ function AdminPortal() {
       if (err.status === 401) setAuthenticated(false);
       setError(err.message || "Could not load admin data.");
     }
-  }, [filter]);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -72,12 +75,18 @@ function AdminPortal() {
       .then(() => {
         if (!active) return;
         setAuthenticated(true);
-        void loadDashboard();
+        void loadDashboard("failed", "");
       })
       .catch(() => {})
       .finally(() => { if (active) setCheckingSession(false); });
     return () => { active = false; };
   }, [loadDashboard]);
+
+  useEffect(() => {
+    if (!authenticated) return undefined;
+    const timer = window.setTimeout(() => { void loadDashboard(filter, search); }, 250);
+    return () => window.clearTimeout(timer);
+  }, [authenticated, filter, search, loadDashboard]);
 
   useEffect(() => {
     document.title = authenticated ? "Admin — JellySwarm" : "Admin sign in — JellySwarm";
@@ -91,7 +100,7 @@ function AdminPortal() {
       await adminApi("/session", { method: "POST", body: { password } });
       setPassword("");
       setAuthenticated(true);
-      await loadDashboard();
+      await loadDashboard(filter, search);
     } catch (err) {
       setPassword("");
       setLoginError(err.status === 429 ? "Too many attempts. Wait a minute and try again." :
@@ -111,6 +120,14 @@ function AdminPortal() {
     setJobs([]);
   };
 
+  const switchToElysium = async () => {
+    try {
+      await switchChain({ chainId: elysium.id });
+    } catch {
+      setError("The wallet could not switch to Elysium.");
+    }
+  };
+
   const openJob = async (job) => {
     setSelected(job);
     setDetail(null);
@@ -128,7 +145,7 @@ function AdminPortal() {
     const signer = account.address;
     if (!signer) return setError("Connect the treasury wallet to sign this decision.");
     if (signer.toLowerCase() !== treasury.toLowerCase()) return setError(`Connect the treasury wallet (${short(treasury)}).`);
-    if (account.chainId !== elysium.id) return setError("Switch the treasury wallet to Elysium.");
+    if (account.chainId !== elysium.id) return setError("Switch the treasury wallet to Elysium to sign this decision.");
     setBusy(true);
     setError("");
     setNotice("");
@@ -152,7 +169,7 @@ function AdminPortal() {
         body: { clientShareBps: shareBps, deadline, signature },
       });
       setNotice(result.status === "settled" ? "Refund decision signed and payout settled." : "Decision recorded. Payout remains pending and will retry automatically.");
-      await loadDashboard();
+      await loadDashboard(filter, search);
       await openJob({ ...selected, status: result.status });
     } catch (err) {
       setError(err.message || "Could not submit the treasury decision.");
@@ -166,7 +183,8 @@ function AdminPortal() {
     ["Needs review", ["failed"]],
     ["Payout pending", ["payout_pending", "settlement_pending"]],
     ["Settled", ["settled"]],
-  ].map(([label, statuses]) => [label, statuses.reduce((sum, status) => sum + (summary?.statuses?.[status]?.count || 0), 0)]), [summary]);
+  ].map(([label, statuses]) => [label, statuses.reduce((sum, status) => sum + (summary?.statuses?.[status]?.count || 0), 0)])
+    .concat([["Stuck 15m+", summary?.stuckCount || 0]]), [summary]);
 
   if (checkingSession) return <div className="admin-lock"><div className="admin-lock-card"><span className="admin-kicker">JELLYSWARM / ADMIN</span><p>Checking session…</p></div></div>;
 
@@ -193,7 +211,7 @@ function AdminPortal() {
         <div className="admin-header-actions"><ConnectButton /><button className="admin-quiet" type="button" onClick={signOut}>Lock</button></div>
       </header>
       <div className="admin-content">
-        <div className="admin-heading"><div><span className="admin-kicker">PRIVATE OPERATIONS</span><h1>Swarm control room</h1><p>Review jobs, monitor payouts, and sign treasury-approved refunds.</p></div><button className="admin-quiet" type="button" onClick={() => loadDashboard()} disabled={busy}>Refresh</button></div>
+        <div className="admin-heading"><div><span className="admin-kicker">PRIVATE OPERATIONS</span><h1>Swarm control room</h1><p>Find stalled work, review failed jobs, and sign treasury-approved refund decisions.</p></div><button className="admin-quiet" type="button" onClick={() => loadDashboard(filter, search)} disabled={busy}>Refresh</button></div>
         {error && <div className="admin-alert" role="alert">{error}</div>}
         {notice && <div className="admin-notice" role="status">{notice}</div>}
         <section className="admin-stat-grid" aria-label="Job summary">
@@ -202,13 +220,16 @@ function AdminPortal() {
         <div className="admin-columns">
           <section className="admin-panel">
             <div className="admin-panel-head"><div><span className="admin-kicker">QUEUE</span><h2>Jobs</h2></div>
-              <select value={filter} onChange={(event) => { setFilter(event.target.value); void loadDashboard(event.target.value); }} aria-label="Filter jobs">
-                <option value="failed">Needs review</option><option value="settlement_pending">Refund pending</option><option value="payout_pending">Payout pending</option><option value="running">Running</option><option value="queued">Queued</option><option value="settled">Settled</option><option value="all">All jobs</option>
-              </select>
+              <div className="admin-job-filters">
+                <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find by job ID, wallet, or task" aria-label="Search jobs" />
+                <select value={filter} onChange={(event) => setFilter(event.target.value)} aria-label="Filter jobs">
+                  <option value="stuck">Stuck · needs attention</option><option value="failed">Failed · resolve dispute</option><option value="settlement_pending">Refund pending</option><option value="payout_pending">Payout pending</option><option value="running">Running</option><option value="queued">Queued</option><option value="settled">Settled</option><option value="all">All jobs</option>
+                </select>
+              </div>
             </div>
             <div className="admin-job-list">
               {jobs.map((job) => <button className={`admin-job${selected?.id === job.id ? " selected" : ""}`} type="button" key={job.id} onClick={() => void openJob(job)}>
-                <span className="admin-job-main"><strong>{job.status.replaceAll("_", " ")}</strong><code>{short(job.id, 10, 8)}</code><span>{job.agentCount} agents · {formatUsdc(job.amountBaseUnits)} USDC</span></span>
+                <span className="admin-job-main"><strong>{job.status.replaceAll("_", " ")}{job.isStuck ? " · stuck" : ""}</strong><code>{short(job.id, 10, 8)}</code><span>{job.agentCount} agents · {formatUsdc(job.amountBaseUnits)} USDC</span></span>
                 <span className="admin-job-date">{new Date(job.createdAt).toLocaleString()}</span>
               </button>)}
               {!jobs.length && <div className="admin-empty">No jobs in this view.</div>}
@@ -225,7 +246,9 @@ function AdminPortal() {
               {detail.job.errorCode && <div className="admin-alert">{detail.job.errorCode}</div>}
               {detail.job.result?.answer && <div className="admin-task"><b>Result</b><p>{detail.job.result.answer}</p></div>}
               <div className="admin-task"><b>Transactions</b><p>Payment: <code>{detail.job.paymentTransactionHash || "—"}</code></p>{detail.payouts.map((payout) => <p key={payout.kind}>{payout.kind}: {payout.status} · <code>{payout.transactionHash || "—"}</code></p>)}</div>
-              {detail.job.status === "failed" && <div className="admin-refund"><label htmlFor="refund-share">Client share</label><select id="refund-share" value={shareBps} onChange={(event) => setShareBps(Number(event.target.value))}><option value={10000}>100% client refund</option><option value={7000}>70% client / 30% treasury</option><option value={5000}>50% client / 50% treasury</option></select><button className="admin-primary" type="button" onClick={() => void issueRefund()} disabled={busy || !treasury}>{busy ? "Waiting for signature…" : "Review and sign refund"}</button><small>Requires an admin session and a signature from the configured treasury wallet.</small></div>}
+              {detail.job.status === "failed" && <div className="admin-refund"><b>Resolve failed job</b><p>Choose the client refund share. The treasury wallet must approve and sign the decision.</p><label htmlFor="refund-share">Client share</label><select id="refund-share" value={shareBps} onChange={(event) => setShareBps(Number(event.target.value))}><option value={10000}>100% client refund</option><option value={7000}>70% client / 30% treasury</option><option value={5000}>50% client / 50% treasury</option></select>
+                {account.address ? <div className={`admin-signer ${account.address.toLowerCase() === treasury.toLowerCase() ? "is-valid" : "is-invalid"}`}><span>{account.address.toLowerCase() === treasury.toLowerCase() ? "Treasury wallet connected" : "Connected wallet does not match treasury"}</span><code>{short(account.address, 8, 6)}</code>{account.chainId !== elysium.id && <button className="admin-quiet" type="button" onClick={() => void switchToElysium()}>Switch to Elysium</button>}</div> : <button className="admin-quiet" type="button" onClick={() => openConnectModal?.()}>Connect treasury wallet</button>}
+                <button className="admin-primary" type="button" onClick={() => void issueRefund()} disabled={busy || !treasury || !account.address || account.address.toLowerCase() !== treasury.toLowerCase() || account.chainId !== elysium.id}>{busy ? "Waiting for signature…" : "Review and sign refund"}</button><small>Requires an admin session and a signature from the configured treasury wallet.</small></div>}
               <details className="admin-agents"><summary>Agent work ({detail.agents.length})</summary>{detail.agents.map((agent) => <article key={agent.agentNumber}><b>Agent {agent.agentNumber} · {agent.status}</b>{agent.errorCode && <p>{agent.errorCode}</p>}{agent.output && <p>{agent.output}</p>}</article>)}</details>
             </>}
           </section>

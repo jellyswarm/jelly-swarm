@@ -41,6 +41,9 @@ AGENTS.md
 our-progress.md
 FRONTEND.md
 
+# Local maintenance tooling
+/scripts/
+
 # Anchor
 .anchor/
 test-ledger/

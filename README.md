@@ -1,79 +1,64 @@
-# JellySwarm
+<p align="center">
+  <img src="public/media/brand-header.png" alt="JellySwarm" width="100%" />
+</p>
 
-[![Backend CI](https://github.com/jellyswarm/jelly-swarm/actions/workflows/backend.yml/badge.svg)](https://github.com/jellyswarm/jelly-swarm/actions/workflows/backend.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-![Vite](https://img.shields.io/badge/Vite-8.x-646CFF?logo=vite&logoColor=white)
-![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)
-![Bun](https://img.shields.io/badge/Bun-1.4.5-000000?logo=bun&logoColor=white)
-![Solidity](https://img.shields.io/badge/Solidity-Foundry-363636?logo=ethereum&logoColor=white)
+<h1 align="center">JellySwarm</h1>
 
-JellySwarm lets a user give one job to as many as 247 independent AI agents. The agents work in parallel and a synthesis call returns one result. Jobs are paid upfront in USDC on Elysium into the escrow wallet. The previous project is preserved in [`legacy/`](legacy/).
+<p align="center">
+  One task. A swarm of independent AI agents. One synthesized result.
+</p>
 
-## Repository layout
+<p align="center">
+  <a href="https://github.com/jellyswarm/jelly-swarm/actions/workflows/backend.yml"><img src="https://github.com/jellyswarm/jelly-swarm/actions/workflows/backend.yml/badge.svg" alt="Backend CI" /></a>
+  <img src="https://img.shields.io/badge/status-live-2ea44f" alt="Live" />
+  <img src="https://img.shields.io/badge/network-Elysium-6554c0" alt="Elysium" />
+  <img src="https://img.shields.io/badge/payment-USDC-2775ca?logo=circle" alt="USDC" />
+  <img src="https://img.shields.io/badge/workers-up%20to%20247-13a89e" alt="Up to 247 agents" />
+  <img src="https://img.shields.io/badge/runtime-Bun-f9f1e1?logo=bun&logoColor=000" alt="Bun" />
+  <img src="https://img.shields.io/badge/frontend-Vite-646cff?logo=vite&logoColor=fff" alt="Vite" />
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="MIT License" /></a>
+</p>
 
-| Path | Purpose |
-| --- | --- |
-| `src/` | React + Vite: marketing pages (`src/site`) and the job app at `/app` (`src/app`, RainbowKit + wagmi) |
-| `public/media/` | Brand images and mascot cutouts |
-| `api/` | Same-origin `/api` proxy rules (`_proxy.js`), used by the Vercel function and the Vite dev server; keeps `MASTER_API_KEY` server-side |
-| `backend/` | Bun + Express + PostgreSQL API and OpenRouter agent runner |
-| `contracts/` | Foundry scaffold; payments currently use the configured escrow EOA wallet |
-| `.github/workflows/backend.yml` | Public-repo backend checks, GHCR publishing, GitHub release, optional Render deployment |
-| `legacy/` | Previous repository state retained under the same Git history |
+JellySwarm turns a complex request into parallel work. Give it one task and choose up to 247 AI agents. They explore the task independently; a final synthesis brings their findings together into one answer.
 
-## Run locally
+## Why a swarm?
 
-Requirements: Bun 1.4.5, PostgreSQL, and Foundry for contract work.
+Many useful tasks benefit from more than one perspective. A single answer can miss alternatives, edge cases, or useful disagreement. JellySwarm gives each agent the same goal, gathers their separate work, and produces one result for a person to review.
+
+The product thesis is simple: make coordinated AI work available as one clear job, with a known price and a result you can inspect.
+
+## What it is useful for
+
+- Compare options, plans, products, or approaches from several angles.
+- Gather and organize research before making a decision.
+- Ask for independent reviews that surface risks and overlooked details.
+- Explore a broad question, then get a concise synthesis of the findings.
+
+JellySwarm is a research and analysis tool. Review important claims and sources before acting on them.
+
+## Pay and run a job
+
+Jobs run on Elysium and are paid upfront in USDC. Choose either the x402 payment flow or send USDC directly from your wallet. Your wallet also needs a little HYPE for network gas. The current price is **0.30 USDC per agent**, including synthesis.
+
+## Live service
+
+- **App:** [jellyswarm.app](https://www.jellyswarm.app)
+- **API health:** [api.jellyswarm.app/health](https://api.jellyswarm.app/health)
+- **Network:** Elysium mainnet
+
+The [production live run](live-run-0xaab237d9a65760c1a254c83a5d0a03bb01ae832b5eef40806b7769d462025340.yaml) records a real one-agent job: it received an x402 quote, paid 0.30 USDC on Elysium, completed agent work, and settled the proceeds to the configured treasury. It also records the API responses and transaction hashes. Direct payment and refund payouts were not part of that run.
+
+## Run the frontend locally
+
+You need [Bun](https://bun.sh/). From this repository:
 
 ```sh
-cp .env.example .env
 bun install
 bun run dev
 ```
 
-The site runs on http://localhost:5173. The Vite dev server proxies `/api` to `BACKEND_API_URL` with the same allowlist as production, adding `MASTER_API_KEY` from the root `.env` on the server. `VITE_WALLETCONNECT_PROJECT_ID` (optional, public) enables mobile and QR wallets in RainbowKit. Point `BACKEND_API_URL` at production (`https://api.jellyswarm.app`) or at a local backend (`http://localhost:3001`). To run the backend locally, use another terminal:
-
-```sh
-cd backend
-cp .env.example .env
-bun install
-bun run dev
-```
-
-The API applies SQL migrations on startup. Set `DATABASE_URL` in `backend/.env` to a local PostgreSQL database. Job quotes also require an Elysium RPC, escrow wallet key pair, `TREASURY_PUBLIC_KEY`, `PRICE_PER_AGENT_USDC`, `OPENROUTER_MODEL`, and the OpenRouter API key. The frontend never receives `MASTER_API_KEY`.
-
-## Checks
-
-```sh
-# Frontend: production build and /api proxy tests
-bun run check
-
-# Backend tests and typecheck
-cd backend
-bun test
-bun run check
-
-# Contracts
-cd ../contracts
-forge install --no-git foundry-rs/forge-std
-forge build
-forge test
-```
-
-## Backend image and deployment
-
-Only `jellyswarm/jelly-swarm` runs the backend workflow: public pushes and pull requests run checks, while pushes to public `main` also publish `ghcr.io/jellyswarm/jellyswarm-backend`, create a GitHub release, and trigger Render when the public repository secret `RENDER_DEPLOY_HOOK_URL` is configured. Workflow jobs skip in the private repo. Vercel needs `BACKEND_API_URL` and `MASTER_API_KEY` as server-side environment variables for its allowlisted `/api` proxy.
-
-After updating private `main`, run `python3 scripts/sync-public.py` to publish its history to the public repo with the `jellyswarm` commit identity. Backend CI, package publishing, release creation, and optional deployment then run from public `main`. The mirror excludes `technical-docs/`.
-
-Configure `DATABASE_URL` and any future service secrets in the Render backend environment. The current health endpoint is `GET /health/`.
-
-## Product/payment flow
-
-`POST /jobs` returns a custom x402 `exact-transfer` challenge or a direct USDC quote. The user transfers USDC to the escrow EOA and pays HYPE gas. The backend verifies the transfer and runs up to 247 agents (20 concurrent provider calls at a time) plus a synthesis call. Successful proceeds are sent to treasury. For failed jobs, an operator decision signed by the treasury wallet sets the client refund to 100%, 70%, or 50%; the escrow wallet executes the payouts.
-
-`PRICE_PER_AGENT_USDC` is the customer-facing charge per agent, not OpenRouter's provider cost. It is multiplied by the selected agent count; synthesis is included. It is set to `0.3`, so a 247-agent job is 74.1 USDC. OpenRouter's current model selection is `tencent/hy4-flash`, with provider routing sorted by price.
+Open the local address printed by Vite. To build the frontend for production, run `bun run build`. Connecting the local app to the live or a local API requires development access; ask a JellySwarm maintainer for that setup. Keep private configuration out of Git.
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE).
+MIT. See [LICENSE](LICENSE).

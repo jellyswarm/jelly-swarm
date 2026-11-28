@@ -27,6 +27,11 @@ const settlementTypes = {
 } as const;
 const allowedStatuses = new Set(["all", "payment_pending", "queued", "running", "payout_pending", "failed", "settlement_pending", "settled"]);
 const jobIdPattern = /^(?:0x)?[\da-fA-F]{64}$/;
+const stuckJobSql = `(
+  (status IN ('queued', 'running', 'payout_pending', 'settlement_pending') AND updated_at < now() - interval '15 minutes')
+  OR (status = 'running' AND (lease_expires_at IS NULL OR lease_expires_at < now()))
+  OR (status = 'payment_pending' AND created_at < now() - interval '30 minutes')
+)`;
 
 function adminError(res: Response, status: number, error: string): void {
   res.status(status).json({ error });
@@ -67,17 +72,19 @@ adminRouter.get("/config", (_req, res) => {
 });
 
 adminRouter.get("/summary", async (_req, res) => {
-  const result = await pool.query<{ status: string; count: number; amount: string }>(
-    `SELECT status, count(*)::int AS count, coalesce(sum(amount_base_units), 0)::text AS amount
+  const result = await pool.query<{ status: string; count: number; amount: string; stuck_count: number }>(
+    `SELECT status, count(*)::int AS count, coalesce(sum(amount_base_units), 0)::text AS amount,
+            (SELECT count(*)::int FROM swarm_jobs WHERE ${stuckJobSql}) AS stuck_count
      FROM swarm_jobs GROUP BY status`,
   );
   const statuses = Object.fromEntries(result.rows.map((row) => [row.status, { count: row.count, amountBaseUnits: row.amount }]));
-  return res.json({ statuses, generatedAt: new Date().toISOString() });
+  return res.json({ statuses, stuckCount: result.rows[0]?.stuck_count ?? 0, generatedAt: new Date().toISOString() });
 });
 
 adminRouter.get("/jobs", async (req, res) => {
   const status = typeof req.query.status === "string" ? req.query.status : "all";
-  if (!allowedStatuses.has(status)) return adminError(res, 400, "invalid_job_status_filter");
+  if (status !== "stuck" && !allowedStatuses.has(status)) return adminError(res, 400, "invalid_job_status_filter");
+  const search = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 200) : "";
   const requestedLimit = Number(req.query.limit ?? 50);
   const limit = Number.isSafeInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : 50;
   const result = await pool.query(
@@ -86,10 +93,15 @@ adminRouter.get("/jobs", async (req, res) => {
             successful_agent_count AS "successfulAgentCount", error_code AS "errorCode",
             settlement_share_bps AS "settlementShareBps", settlement_tx_hash AS "settlementTransactionHash",
             client_payout_tx_hash AS "clientPayoutTransactionHash", treasury_payout_tx_hash AS "treasuryPayoutTransactionHash",
-            created_at AS "createdAt", updated_at AS "updatedAt"
-     FROM swarm_jobs WHERE ($1 = 'all' OR status = $1)
-     ORDER BY created_at DESC LIMIT $2`,
-    [status, limit],
+            created_at AS "createdAt", updated_at AS "updatedAt",
+            (${stuckJobSql}) AS "isStuck"
+     FROM swarm_jobs
+     WHERE ($1 = 'all' OR status = $1 OR ($1 = 'stuck' AND (${stuckJobSql})))
+       AND ($2 = '' OR id ILIKE '%' || replace($2, '0x', '') || '%'
+            OR client_address ILIKE '%' || $2 || '%' OR task ILIKE '%' || $2 || '%')
+     ORDER BY CASE WHEN (${stuckJobSql}) THEN 0 ELSE 1 END, updated_at ASC
+     LIMIT $3`,
+    [status, search, limit],
   );
   return res.json({ jobs: result.rows.map((job) => ({ ...job, id: `0x${String(job.id).trim()}` })) });
 });

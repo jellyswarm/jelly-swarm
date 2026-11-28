@@ -1,5 +1,5 @@
 import express from "express";
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { healthRouter } from "./routes/health";
 import { jobsRouter } from "./routes/jobs";
 import { adminRouter } from "./routes/admin";
@@ -7,6 +7,22 @@ import { consumeRateLimit } from "./services/rate-limit";
 
 export const app = express();
 app.disable("x-powered-by");
+app.use((req, res, next) => {
+  const requestId = randomUUID();
+  const startedAt = Date.now();
+  res.setHeader("x-request-id", requestId);
+  res.on("finish", () => {
+    console.info(JSON.stringify({
+      event: "http_request",
+      requestId,
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      durationMs: Date.now() - startedAt,
+    }));
+  });
+  next();
+});
 app.use(express.json({ limit: "1mb" }));
 app.use("/health", healthRouter);
 
@@ -57,7 +73,13 @@ app.use(async (req, res, next) => {
 app.use("/jobs", jobsRouter);
 app.use("/admin", adminRouter);
 app.use((_req, res) => res.status(404).json({ error: "not_found" }));
-app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error("Unhandled API error", error);
+app.use((error: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error(JSON.stringify({
+    event: "http_request_error",
+    requestId: res.getHeader("x-request-id"),
+    method: req.method,
+    path: req.path,
+    errorType: error instanceof Error ? error.name : "unknown_error",
+  }));
   res.status(500).json({ error: "internal_error" });
 });

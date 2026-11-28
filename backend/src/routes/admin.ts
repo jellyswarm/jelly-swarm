@@ -10,7 +10,7 @@ import {
   setAdminSessionCookie,
 } from "../services/admin-auth";
 import { getChainConfig, getPaymentConfig } from "../services/chain";
-import { executeRefundPayout } from "../services/settlements";
+import { schedulePayoutRecovery } from "../services/settlements";
 
 export const adminRouter = Router();
 
@@ -231,10 +231,12 @@ adminRouter.post("/jobs/:id/settlement", async (req, res) => {
       return adminError(res, 409, "settlement_already_recorded");
     }
   }
-  try {
-    const payout = await executeRefundPayout(id.toLowerCase());
-    return res.json({ jobId: `0x${id}`, status: payout.status, payouts: payout.transactions });
-  } catch {
-    return res.status(503).json({ error: "payout_pending_retry_required", status: "settlement_pending" });
-  }
+  console.info(JSON.stringify({
+    event: "refund_decision_authorized",
+    requestId: res.getHeader("x-request-id"),
+    jobId: id.toLowerCase(),
+    clientShareBps,
+  }));
+  schedulePayoutRecovery(id.toLowerCase(), "settlement_pending");
+  return res.status(202).json({ jobId: `0x${id}`, status: "settlement_pending", payoutStatus: "processing" });
 });

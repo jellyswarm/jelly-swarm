@@ -17,6 +17,7 @@ export default async function handler(req, res) {
   const result = await forward({ method: req.method, url: originalUrl(req.url), body: req.body, clientIp, cookie: req.headers.cookie });
   if (result.paymentRequired) res.setHeader("PAYMENT-REQUIRED", result.paymentRequired);
   if (result.setCookie) res.setHeader("Set-Cookie", result.setCookie);
+  if (result.requestId) res.setHeader("x-request-id", result.requestId);
   res.setHeader("content-type", result.contentType);
   res.setHeader("cache-control", "no-store");
   return res.status(result.status).send(result.body);

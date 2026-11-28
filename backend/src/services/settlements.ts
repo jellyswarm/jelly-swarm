@@ -25,6 +25,12 @@ type PayoutIntent = {
 };
 
 const nonceLock = "jellyswarm:escrow-payout-nonce";
+const scheduledPayouts = new Map<string, Promise<void>>();
+
+function safeErrorCode(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  return /^[a-zA-Z0-9_:-]{1,80}$/.test(message) ? message : "unexpected_error";
+}
 
 async function lockJob(jobId: string, run: () => Promise<{ status: string; transactions: string[] }>) {
   const connection = await pool.connect();
@@ -159,7 +165,7 @@ async function replaceStuckIntent(jobId: string, kind: "client" | "treasury"): P
   }
 }
 
-async function trackedTransfer(
+async function trackedTransferInternal(
   jobId: string,
   kind: "client" | "treasury",
   recipient: Address,
@@ -238,6 +244,27 @@ async function trackedTransfer(
   return activeIntent.transaction_hash;
 }
 
+async function trackedTransfer(
+  jobId: string,
+  kind: "client" | "treasury",
+  recipient: Address,
+  amount: bigint,
+  existingHash: string | null,
+): Promise<string | null> {
+  try {
+    return await trackedTransferInternal(jobId, kind, recipient, amount, existingHash);
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "payout_transfer_failed",
+      jobId,
+      kind,
+      errorCode: safeErrorCode(error),
+      errorType: error instanceof Error ? error.name : "unknown_error",
+    }));
+    throw error;
+  }
+}
+
 async function loadPayoutJob(jobId: string) {
   const result = await pool.query<PayoutJob>(
     `SELECT client_address, amount_base_units, automatic_refund_base_units, status, settlement_share_bps,
@@ -294,4 +321,19 @@ export async function executeRefundPayout(jobId: string) {
     );
     return { status: "settled", transactions: [clientHash, treasuryHash].filter((hash): hash is string => Boolean(hash)) };
   });
+}
+
+/** Start a payout retry without holding an HTTP request open while confirmations arrive. */
+export function schedulePayoutRecovery(jobId: string, status: "payout_pending" | "settlement_pending"): void {
+  if (scheduledPayouts.has(jobId)) return;
+  const execute = status === "payout_pending" ? executeSuccessPayout : executeRefundPayout;
+  const attempt = execute(jobId)
+    .then((result) => {
+      console.info(JSON.stringify({ event: "payout_recovery_finished", jobId, status: result.status }));
+    })
+    .catch((error: unknown) => {
+      console.error(JSON.stringify({ event: "payout_recovery_pending", jobId, errorCode: safeErrorCode(error) }));
+    })
+    .finally(() => scheduledPayouts.delete(jobId));
+  scheduledPayouts.set(jobId, attempt);
 }

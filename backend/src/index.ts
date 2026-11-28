@@ -3,7 +3,7 @@ import { app } from "./app";
 import { migrate } from "./db/migrate";
 import { pool } from "./db";
 import { runJobAgents } from "./services/agents";
-import { executeRefundPayout, executeSuccessPayout } from "./services/settlements";
+import { schedulePayoutRecovery } from "./services/settlements";
 
 const port = Number(process.env.PORT ?? 3001);
 await migrate();
@@ -33,8 +33,7 @@ async function recoverPayouts() {
     "SELECT id, status FROM swarm_jobs WHERE status IN ('payout_pending', 'settlement_pending') ORDER BY created_at LIMIT 25",
   );
   for (const job of pending.rows) {
-    const retry = job.status === "payout_pending" ? executeSuccessPayout : executeRefundPayout;
-    void retry(job.id).catch(() => console.error(`Payout retry remains pending for job ${job.id}.`));
+    schedulePayoutRecovery(job.id, job.status as "payout_pending" | "settlement_pending");
   }
 }
 

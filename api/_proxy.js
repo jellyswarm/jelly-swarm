@@ -79,6 +79,7 @@ export async function forward({ method, url, body, env = process.env, clientIp, 
       contentType: upstream.headers.get("content-type") ?? "application/json",
       paymentRequired: upstream.headers.get("payment-required"),
       setCookie: path.startsWith("/admin/") ? upstream.headers.get("set-cookie") : null,
+      requestId: upstream.headers.get("x-request-id"),
       body: await upstream.text(),
     };
   } catch {
@@ -87,5 +88,5 @@ export async function forward({ method, url, body, env = process.env, clientIp, 
 }
 
 function json(status, value) {
-  return { status, contentType: "application/json", paymentRequired: null, setCookie: null, body: JSON.stringify(value) };
+  return { status, contentType: "application/json", paymentRequired: null, setCookie: null, requestId: null, body: JSON.stringify(value) };
 }

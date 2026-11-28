@@ -29,6 +29,7 @@ function apiProxy(env) {
         res.setHeader("cache-control", "no-store");
         if (result.paymentRequired) res.setHeader("PAYMENT-REQUIRED", result.paymentRequired);
         if (result.setCookie) res.setHeader("Set-Cookie", result.setCookie);
+        if (result.requestId) res.setHeader("x-request-id", result.requestId);
         res.end(result.body);
       });
     },

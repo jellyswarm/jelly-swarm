@@ -1,5 +1,5 @@
 // Server-side proxy rules shared by the Vercel function (api/proxy.js) and the local
-// dev server (dev-server.ts). The browser only ever calls same-origin /api/...; this code
+// Vite dev server (vite.config.js). The browser only ever calls same-origin /api/...; this code
 // adds the backend key on the server, so the key never reaches the page and no CORS is needed.
 
 const JOB_ID = "(?:0x)?[0-9a-fA-F]{64}";
@@ -29,7 +29,8 @@ export function backendPath(url) {
  */
 export async function forward({ method, url, body, env = process.env }) {
   const backendUrl = env.BACKEND_API_URL;
-  const apiKey = env.MASTER_API_KEY;
+  // MASTER_API_KEY is the documented name; API_KEY is accepted too (that is what Vercel has it saved as).
+  const apiKey = env.MASTER_API_KEY || env.API_KEY;
   if (!backendUrl || !apiKey) return json(503, { error: "backend_proxy_not_configured" });
 
   const path = backendPath(url);

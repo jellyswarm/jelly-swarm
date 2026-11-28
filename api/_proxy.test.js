@@ -57,6 +57,11 @@ describe("forward", () => {
     expect(seen).toBeUndefined();
   });
 
+  test("accepts the key saved as API_KEY", async () => {
+    await forward({ method: "GET", url: `/api/jobs/${JOB}`, env: { BACKEND_API_URL: env().BACKEND_API_URL, API_KEY: "alt-key" } });
+    expect(seen.key).toBe("alt-key");
+  });
+
   test("returns 503 when the key or backend URL is missing", async () => {
     const out = await forward({ method: "GET", url: `/api/jobs/${JOB}`, env: {} });
     expect(out.status).toBe(503);

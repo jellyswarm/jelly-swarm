@@ -1,3 +1,5 @@
+import { isIP } from "node:net";
+
 // Server-side proxy rules shared by the Vercel function (api/proxy.js) and the local
 // Vite dev server (vite.config.js). The browser only ever calls same-origin /api/...; this code
 // adds the backend key on the server, so the key never reaches the page and no CORS is needed.
@@ -27,7 +29,7 @@ export function backendPath(url) {
  * Forwards one allowed request to the backend.
  * Returns { status, contentType, paymentRequired, body } for the caller to relay.
  */
-export async function forward({ method, url, body, env = process.env }) {
+export async function forward({ method, url, body, env = process.env, clientIp }) {
   const backendUrl = env.BACKEND_API_URL;
   // MASTER_API_KEY is the documented name; API_KEY is accepted too (that is what Vercel has it saved as).
   const apiKey = env.MASTER_API_KEY || env.API_KEY;
@@ -40,6 +42,9 @@ export async function forward({ method, url, body, env = process.env }) {
   const target = new URL(path, backendUrl);
   target.search = new URL(url, "https://jellyswarm.invalid").search;
   const headers = { "x-api-key": apiKey, accept: "application/json" };
+  if (typeof clientIp === "string" && isIP(clientIp.trim())) {
+    headers["x-jellyswarm-client-ip"] = clientIp.trim();
+  }
   let payload;
   if (method !== "GET") {
     headers["content-type"] = "application/json";

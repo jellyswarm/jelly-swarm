@@ -12,7 +12,9 @@ export function originalUrl(reqUrl) {
 }
 
 export default async function handler(req, res) {
-  const result = await forward({ method: req.method, url: originalUrl(req.url), body: req.body });
+  const rawClientIp = req.headers["x-forwarded-for"];
+  const clientIp = typeof rawClientIp === "string" ? rawClientIp.split(",", 1)[0].trim() : undefined;
+  const result = await forward({ method: req.method, url: originalUrl(req.url), body: req.body, clientIp });
   if (result.paymentRequired) res.setHeader("PAYMENT-REQUIRED", result.paymentRequired);
   res.setHeader("content-type", result.contentType);
   res.setHeader("cache-control", "no-store");

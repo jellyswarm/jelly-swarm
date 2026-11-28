@@ -2,6 +2,7 @@ import express from "express";
 import { timingSafeEqual } from "node:crypto";
 import { healthRouter } from "./routes/health";
 import { jobsRouter } from "./routes/jobs";
+import { consumeRateLimit } from "./services/rate-limit";
 
 export const app = express();
 app.disable("x-powered-by");
@@ -23,6 +24,33 @@ app.use((req, res, next) => {
 
   if (!valid) return res.status(401).json({ error: "unauthorized" });
   next();
+});
+
+app.use(async (req, res, next) => {
+  if (!req.path.startsWith("/jobs")) return next();
+
+  let scope: string | undefined;
+  let limit = 0;
+  if (req.method === "POST" && req.path === "/jobs") {
+    scope = "quote";
+    limit = 10;
+  } else if (req.method === "POST" && /^\/jobs\/(?:0x)?[0-9a-fA-F]{64}\/payment$/.test(req.path)) {
+    scope = "payment";
+    limit = 30;
+  } else if (req.method === "GET" && /^\/jobs\/(?:0x)?[0-9a-fA-F]{64}(?:\/agents)?$/.test(req.path)) {
+    scope = "read";
+    limit = 240;
+  }
+  if (!scope) return next();
+
+  const clientIdentity = req.header("x-jellyswarm-client-ip") ?? req.ip ?? "unknown";
+  const allowed = await consumeRateLimit(scope, clientIdentity, limit);
+  if (!allowed) {
+    const retryAfter = 60 - Math.floor((Date.now() % 60_000) / 1000);
+    res.setHeader("Retry-After", String(retryAfter));
+    return res.status(429).json({ error: "rate_limit_exceeded", retryAfterSeconds: retryAfter });
+  }
+  return next();
 });
 
 app.use("/jobs", jobsRouter);

@@ -1,6 +1,6 @@
 import React, { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { getAccount, getBalance, readContract, waitForTransactionReceipt, writeContract } from "wagmi/actions";
+import { getAccount, getBalance, readContract, signTypedData, waitForTransactionReceipt, writeContract } from "wagmi/actions";
 import { erc20Abi } from "viem";
 import { ApiError, ERRORS, JOB_ID, LIVE, STATUS, api, clip, formatUsdc, saveJob, short, sleep, storedJob, useJobs } from "../lib.js";
 import { EXPLORER, USDC, config, elysium } from "../wallet.js";
@@ -172,13 +172,25 @@ export default function Job() {
   }, [job, refresh, toast]);
 
   const verify = useCallback(async () => {
-    const tx = storedJob(id)?.txHash;
+    const quote = storedJob(id);
+    const tx = quote?.txHash;
     if (!tx) return toast("No payment found for this job on this device.", "warn");
+    if (!quote?.paymentClaim) return toast("This quote predates payment verification. Create a new quote before submitting payment.", "warn");
     setChecking(true);
     const progress = toast("Confirming your payment with JellySwarm…", "progress");
     try {
+      const address = await ensureWallet();
+      if (address.toLowerCase() !== quote.clientAddress.toLowerCase()) throw new Error(`Switch to the wallet that created this quote (${short(quote.clientAddress)}).`);
+      const deadline = Math.floor(Date.now() / 1000) + quote.paymentClaim.validForSeconds;
+      const signature = await signTypedData(config, {
+        account: address,
+        domain: quote.paymentClaim.domain,
+        types: quote.paymentClaim.types,
+        primaryType: quote.paymentClaim.primaryType,
+        message: { jobId: id, transactionHash: tx, payer: address, deadline: BigInt(deadline) },
+      });
       for (let attempt = 0; attempt < 40; attempt++) {
-        const res = await api(`/jobs/${id}/payment`, { method: "POST", body: { transactionHash: tx } });
+        const res = await api(`/jobs/${id}/payment`, { method: "POST", body: { transactionHash: tx, signature, deadline } });
         if (res.status === 202) {
           progress.update("Payment confirmed. Your swarm is on it.", "success");
           await refresh();
@@ -202,7 +214,7 @@ export default function Job() {
     } finally {
       setChecking(false);
     }
-  }, [id, refresh, toast]);
+  }, [ensureWallet, id, refresh, toast]);
 
   async function pay() {
     const q = storedJob(id);

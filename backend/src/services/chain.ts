@@ -2,9 +2,11 @@ import {
   createPublicClient,
   createWalletClient,
   defineChain,
+  encodeFunctionData,
   fallback,
   getAddress,
   http,
+  keccak256,
   parseEventLogs,
   parseUnits,
   type Address,
@@ -49,6 +51,15 @@ export const erc20Abi = [
     outputs: [{ name: "", type: "uint8" }],
   },
 ] as const;
+
+export const paymentClaimTypes = {
+  PaymentClaim: [
+    { name: "jobId", type: "bytes32" },
+    { name: "transactionHash", type: "bytes32" },
+    { name: "payer", type: "address" },
+    { name: "deadline", type: "uint256" },
+  ],
+} as const;
 
 export function getChainConfig() {
   const id = Number(process.env.ELYSIUM_CHAIN_ID);
@@ -109,7 +120,11 @@ export function getEscrowWalletClient() {
   return createWalletClient({ account: getEscrowAccount(), chain: getChainConfig(), transport: getTransport() });
 }
 
-export async function assertPaymentReadiness() {
+type PaymentReadiness = Awaited<ReturnType<typeof checkPaymentReadiness>>;
+let readinessCache: { checkedAt: number; value: PaymentReadiness } | undefined;
+let readinessInFlight: Promise<PaymentReadiness> | undefined;
+
+async function checkPaymentReadiness() {
   const chain = getChainConfig();
   if (chain.id !== 99_901) throw new Error("elysium_mainnet_chain_id_mismatch");
   const payment = getPaymentConfig();
@@ -131,10 +146,24 @@ export async function assertPaymentReadiness() {
   return { ...payment, chain };
 }
 
+export async function assertPaymentReadiness(): Promise<PaymentReadiness> {
+  if (readinessCache && Date.now() - readinessCache.checkedAt < 60_000) return readinessCache.value;
+  if (!readinessInFlight) {
+    readinessInFlight = checkPaymentReadiness()
+      .then((value) => {
+        readinessCache = { checkedAt: Date.now(), value };
+        return value;
+      })
+      .finally(() => { readinessInFlight = undefined; });
+  }
+  return readinessInFlight;
+}
+
 export async function verifyFundingReceipt(input: {
   transactionHash: Hash;
   clientAddress: Address;
   amountBaseUnits: bigint;
+  quoteCreatedAt: Date;
 }) {
   const { escrow, usdc } = getPaymentConfig();
   const client = getChainClient();
@@ -142,6 +171,9 @@ export async function verifyFundingReceipt(input: {
   if (receipt.status !== "success") return false;
   const head = await client.getBlockNumber();
   if (head < receipt.blockNumber + 2n) return false;
+  const block = await client.getBlock({ blockHash: receipt.blockHash });
+  const quoteTime = BigInt(Math.floor(input.quoteCreatedAt.getTime() / 1000));
+  if (block.timestamp + 120n < quoteTime) return false;
   const events = parseEventLogs({ abi: erc20Abi, logs: receipt.logs, eventName: "Transfer" });
   return events.some(({ address, args }) =>
     address.toLowerCase() === usdc.toLowerCase() &&
@@ -159,6 +191,33 @@ export async function sendEscrowTransfer(to: Address, amount: bigint): Promise<H
     functionName: "transfer",
     args: [to, amount],
   });
+}
+
+export async function prepareEscrowTransfer(to: Address, amount: bigint, nonce: number, gasPriceOverride?: bigint) {
+  const { usdc } = getPaymentConfig();
+  const account = getEscrowAccount();
+  const client = getChainClient();
+  const chain = getChainConfig();
+  const data = encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [to, amount] });
+  const [gas, gasPrice] = await Promise.all([
+    client.estimateGas({ account: account.address, to: usdc, data }),
+    gasPriceOverride ? Promise.resolve(gasPriceOverride) : client.getGasPrice(),
+  ]);
+  const serializedTransaction = await account.signTransaction({
+    chainId: chain.id,
+    type: "legacy",
+    nonce,
+    to: usdc,
+    value: 0n,
+    data,
+    gas,
+    gasPrice,
+  });
+  return { serializedTransaction, hash: keccak256(serializedTransaction), gasPrice };
+}
+
+export async function broadcastEscrowTransfer(serializedTransaction: `0x${string}`): Promise<Hash> {
+  return getChainClient().sendRawTransaction({ serializedTransaction });
 }
 
 export async function verifyEscrowTransfer(input: {

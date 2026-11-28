@@ -70,6 +70,7 @@ export default function NewJob() {
         payTo: accept.payTo,
         asset: accept.asset,
         fundCall: q.fundCall,
+        paymentClaim: q.paymentClaim,
         clientAddress: (accept.extra?.clientAddress || address).toLowerCase(),
         paymentMode: q.paymentMode || mode,
         status: "payment_pending",

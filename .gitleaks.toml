@@ -1,0 +1,12 @@
+[allowlist]
+description = "Exact historical false positives: a browser storage key name and hard-coded test-only EVM addresses in the frozen legacy app."
+paths = [
+  '''(^|/)apps/web/wallet\.js$''',
+  '''(^|/)packages/checker/src/checker\.test\.ts$''',
+  '''(^|/)packages/engine/src/pricing\.test\.ts$''',
+  '''(^|/)packages/tools/src/tools\.test\.ts$''',
+]
+regexes = [
+  '''(?i)^jellyswarm-wallet-v1$''',
+  '''(?i)^0x833589fcd6edb6e08f4c7c32d4f71b54bda02913$''',
+]

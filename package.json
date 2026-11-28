@@ -8,7 +8,8 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "check": "vite build && bun test ./api"
+    "check": "vite build && bun run test",
+    "test": "bun test ./api backend/tests"
   },
   "dependencies": {
     "@rainbow-me/rainbowkit": "2.2.11",

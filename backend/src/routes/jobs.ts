@@ -1,8 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { Router, type Response } from "express";
-import { recoverTypedDataAddress, type Hash } from "viem";
+import { recoverTypedDataAddress, type Address, type Hash } from "viem";
 import { pool } from "../db";
-import { assertPaymentReadiness, getChainConfig, getPaymentConfig, verifyFundingReceipt } from "../services/chain";
+import { assertPaymentReadiness, getChainClient, getChainConfig, getPaymentConfig, paymentClaimTypes, verifyFundingReceipt } from "../services/chain";
 import { executeRefundPayout } from "../services/settlements";
 import { runJobAgents } from "../services/agents";
 
@@ -19,6 +19,7 @@ const settlementTypes = {
     { name: "deadline", type: "uint256" },
   ],
 } as const;
+const paymentClaimLifetimeSeconds = 10 * 60;
 
 function paymentConfiguration(res: Response) {
   try {
@@ -54,11 +55,32 @@ jobsRouter.post("/", async (req, res) => {
   const amount = payment.pricePerAgentBaseUnits * BigInt(agentCount);
   if (amount > (1n << 128n) - 1n) return res.status(400).json({ error: "quote_too_large" });
   const jobId = randomBytes(32).toString("hex");
-  await pool.query(
-    `INSERT INTO swarm_jobs (id, client_address, task, agent_count, amount_base_units, status)
-     VALUES ($1, $2, $3, $4, $5, 'payment_pending')`,
-    [jobId, clientAddress.toLowerCase(), task, agentCount, amount.toString()],
-  );
+  const quoteClient = await pool.connect();
+  try {
+    await quoteClient.query("BEGIN");
+    await quoteClient.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`quotes:${clientAddress.toLowerCase()}`]);
+    const outstandingQuotes = await quoteClient.query<{ count: number }>(
+      `SELECT count(*)::int AS count FROM swarm_jobs
+       WHERE client_address = $1 AND status = 'payment_pending'
+         AND created_at > now() - interval '24 hours'`,
+      [clientAddress.toLowerCase()],
+    );
+    if ((outstandingQuotes.rows[0]?.count ?? 0) >= 20) {
+      await quoteClient.query("ROLLBACK");
+      return res.status(429).json({ error: "unpaid_quote_limit_exceeded", maximum: 20, windowHours: 24 });
+    }
+    await quoteClient.query(
+      `INSERT INTO swarm_jobs (id, client_address, task, agent_count, amount_base_units, status)
+       VALUES ($1, $2, $3, $4, $5, 'payment_pending')`,
+      [jobId, clientAddress.toLowerCase(), task, agentCount, amount.toString()],
+    );
+    await quoteClient.query("COMMIT");
+  } catch (error) {
+    await quoteClient.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    quoteClient.release();
+  }
 
   const chain = readiness.chain;
   const requirements = {
@@ -79,6 +101,12 @@ jobsRouter.post("/", async (req, res) => {
     agentCount,
     paymentMode,
     payment: requirements,
+    paymentClaim: {
+      domain: { name: "JellySwarmPaymentClaim", version: "1", chainId: chain.id, verifyingContract: payment.escrow },
+      types: paymentClaimTypes,
+      primaryType: "PaymentClaim",
+      validForSeconds: paymentClaimLifetimeSeconds,
+    },
     fundCall: { contract: payment.usdc, functionName: "transfer", args: [payment.escrow, amount.toString()] },
     gasToken: "HYPE",
   };
@@ -96,12 +124,18 @@ jobsRouter.post("/:id/payment", async (req, res) => {
   if (typeof txHash !== "string" || !/^0x[\da-fA-F]{64}$/.test(txHash)) {
     return res.status(400).json({ error: "invalid_transaction_hash" });
   }
+  const signature = req.body?.signature;
+  const deadline = req.body?.deadline;
+  if (typeof signature !== "string" || !/^0x(?:[\da-fA-F]{2}){1,2048}$/.test(signature) || !Number.isSafeInteger(deadline)) {
+    return res.status(400).json({ error: "invalid_payment_claim" });
+  }
   const found = await pool.query<{
     client_address: string;
     amount_base_units: string;
     status: string;
     payment_tx_hash: string | null;
-  }>("SELECT client_address, amount_base_units, status, payment_tx_hash FROM swarm_jobs WHERE id = $1", [id.toLowerCase()]);
+    created_at: Date;
+  }>("SELECT client_address, amount_base_units, status, payment_tx_hash, created_at FROM swarm_jobs WHERE id = $1", [id.toLowerCase()]);
   const job = found.rows[0];
   if (!job) return res.status(404).json({ error: "job_not_found" });
   if (job.status !== "payment_pending") {
@@ -110,28 +144,56 @@ jobsRouter.post("/:id/payment", async (req, res) => {
     }
     return res.status(409).json({ error: "job_not_awaiting_payment", status: job.status });
   }
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (deadline <= nowSeconds || deadline > nowSeconds + paymentClaimLifetimeSeconds) {
+    return res.status(403).json({ error: "payment_claim_expired" });
+  }
+
+  const payment = paymentConfiguration(res);
+  if (!payment) return;
+  const chain = getChainConfig();
+  const claimValid = await getChainClient().verifyTypedData({
+    address: job.client_address as Address,
+    domain: { name: "JellySwarmPaymentClaim", version: "1", chainId: chain.id, verifyingContract: payment.escrow },
+    types: paymentClaimTypes,
+    primaryType: "PaymentClaim",
+    message: {
+      jobId: `0x${id}` as Hash,
+      transactionHash: txHash as Hash,
+      payer: job.client_address as Address,
+      deadline: BigInt(deadline),
+    },
+    signature: signature as Hash,
+  }).catch(() => false);
+  if (!claimValid) return res.status(403).json({ error: "invalid_payment_claim" });
 
   try {
     const valid = await verifyFundingReceipt({
       transactionHash: txHash as Hash,
       clientAddress: job.client_address as `0x${string}`,
       amountBaseUnits: BigInt(job.amount_base_units),
+      quoteCreatedAt: job.created_at,
     });
     if (!valid) return res.status(409).json({ error: "payment_not_confirmed" });
   } catch {
     return res.status(502).json({ error: "payment_verification_unavailable" });
   }
 
-  const updated = await pool.query(
-    `UPDATE swarm_jobs SET status = 'queued', payment_tx_hash = $2, updated_at = now()
-     WHERE id = $1 AND status = 'payment_pending' RETURNING task, agent_count`,
-    [id.toLowerCase(), txHash.toLowerCase()],
-  );
+  let updated;
+  try {
+    updated = await pool.query(
+      `UPDATE swarm_jobs SET status = 'queued', payment_tx_hash = $2, updated_at = now()
+       WHERE id = $1 AND status = 'payment_pending' RETURNING task, agent_count`,
+      [id.toLowerCase(), txHash.toLowerCase()],
+    );
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "23505") {
+      return res.status(409).json({ error: "payment_already_used" });
+    }
+    throw error;
+  }
   if (!updated.rows[0]) return res.status(409).json({ error: "job_payment_already_recorded" });
-  const paidJob = updated.rows[0] as { task: string; agent_count: number };
-  void runJobAgents(id.toLowerCase(), paidJob.task, paidJob.agent_count).catch(async () => {
-    await pool.query("UPDATE swarm_jobs SET status = 'failed', error_code = 'agent_worker_failed', updated_at = now() WHERE id = $1", [id.toLowerCase()]);
-  });
+  void runJobAgents(id.toLowerCase()).catch(() => console.error(`Job worker will recover job ${id.toLowerCase()} after its lease expires.`));
   return res.status(202).json({ jobId: `0x${id}`, status: "queued" });
 });
 

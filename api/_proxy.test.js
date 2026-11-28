@@ -28,7 +28,7 @@ describe("forward", () => {
     server = Bun.serve({
       port: 0,
       async fetch(req) {
-        seen = { method: req.method, path: new URL(req.url).pathname, key: req.headers.get("x-api-key"), body: await req.text() };
+        seen = { method: req.method, path: new URL(req.url).pathname, key: req.headers.get("x-api-key"), clientIp: req.headers.get("x-jellyswarm-client-ip"), body: await req.text() };
         return new Response(JSON.stringify({ error: "payment_required", jobId: JOB }), {
           status: 402,
           headers: { "content-type": "application/json", "payment-required": "eyJ4In0=" },
@@ -41,13 +41,19 @@ describe("forward", () => {
   const env = () => ({ BACKEND_API_URL: `http://localhost:${server.port}`, MASTER_API_KEY: "secret-key" });
 
   test("adds the service key on the server and relays status, body and PAYMENT-REQUIRED", async () => {
-    const out = await forward({ method: "POST", url: "/api/jobs", body: { task: "hi there", agentCount: 1 }, env: env() });
+    const out = await forward({ method: "POST", url: "/api/jobs", body: { task: "hi there", agentCount: 1 }, env: env(), clientIp: "203.0.113.7" });
     expect(seen.key).toBe("secret-key");
+    expect(seen.clientIp).toBe("203.0.113.7");
     expect(seen.path).toBe("/jobs");
     expect(JSON.parse(seen.body)).toEqual({ task: "hi there", agentCount: 1 });
     expect(out.status).toBe(402);
     expect(out.paymentRequired).toBe("eyJ4In0=");
     expect(JSON.parse(out.body).jobId).toBe(JOB);
+  });
+
+  test("does not forward malformed client IP values", async () => {
+    await forward({ method: "GET", url: `/api/jobs/${JOB}`, env: env(), clientIp: "not-an-ip" });
+    expect(seen.clientIp).toBeNull();
   });
 
   test("refuses routes outside the allowlist without calling the backend", async () => {

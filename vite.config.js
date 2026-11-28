@@ -23,11 +23,12 @@ function apiProxy(env) {
           }
         }
         // Connect strips the "/api" mount path from req.url; put it back for the shared rules.
-        const result = await forward({ method: req.method, url: `/api${req.url}`, body, env });
+        const result = await forward({ method: req.method, url: `/api${req.url}`, body, env, cookie: req.headers.cookie });
         res.statusCode = result.status;
         res.setHeader("content-type", result.contentType);
         res.setHeader("cache-control", "no-store");
         if (result.paymentRequired) res.setHeader("PAYMENT-REQUIRED", result.paymentRequired);
+        if (result.setCookie) res.setHeader("Set-Cookie", result.setCookie);
         res.end(result.body);
       });
     },

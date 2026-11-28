@@ -12,6 +12,7 @@ import Whitepaper from "./site/Whitepaper.jsx";
 
 // The app (RainbowKit, wagmi, viem) loads only when someone opens it.
 const AppRoot = lazy(() => import("./app/AppRoot.jsx"));
+const AdminPortal = lazy(() => import("./admin/AdminPortal.jsx"));
 
 function AppLoading() {
   return (
@@ -41,6 +42,7 @@ createRoot(document.getElementById("root")).render(
         <Route path="/system" element={<System />} />
         <Route path="/roadmap" element={<Roadmap />} />
         <Route path="/whitepaper" element={<Whitepaper />} />
+        <Route path="/admin" element={<Suspense fallback={<AppLoading />}><AdminPortal /></Suspense>} />
         <Route
           path="/app/*"
           element={

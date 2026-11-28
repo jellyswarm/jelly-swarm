@@ -7,8 +7,25 @@ import { isIP } from "node:net";
 const JOB_ID = "(?:0x)?[0-9a-fA-F]{64}";
 const JOB_PAYMENT = new RegExp(`^/jobs/${JOB_ID}/payment$`);
 const JOB_READ = new RegExp(`^/jobs/${JOB_ID}(?:/agents)?$`);
+const ADMIN_JOB = new RegExp(`^/admin/jobs/${JOB_ID}$`);
+const ADMIN_SETTLEMENT_DATA = new RegExp(`^/admin/jobs/${JOB_ID}/settlement/typed-data$`);
+const ADMIN_SETTLEMENT = new RegExp(`^/admin/jobs/${JOB_ID}/settlement$`);
 
-/** Only job creation, payment verification and job reads are exposed. Never settlement or admin. */
+function isAdminAllowed(method, path) {
+  if (path === "/admin/session") return ["GET", "POST", "DELETE"].includes(method);
+  if (["/admin/config", "/admin/summary", "/admin/jobs"].includes(path)) return method === "GET";
+  if (method === "GET" && (ADMIN_JOB.test(path) || ADMIN_SETTLEMENT_DATA.test(path))) return true;
+  if (method === "POST" && ADMIN_SETTLEMENT.test(path)) return true;
+  return false;
+}
+
+function adminCookieHeader(rawCookie) {
+  if (typeof rawCookie !== "string") return undefined;
+  const cookies = rawCookie.split(";").map((part) => part.trim()).filter((part) => part.startsWith("jellyswarm_admin="));
+  return cookies.length === 1 ? cookies[0] : undefined;
+}
+
+/** Public app routes. Admin routes have a separate explicit allowlist below. */
 export function isAllowed(method, path) {
   if (method === "POST" && path === "/jobs") return true;
   if (method === "POST" && JOB_PAYMENT.test(path)) return true;
@@ -29,7 +46,7 @@ export function backendPath(url) {
  * Forwards one allowed request to the backend.
  * Returns { status, contentType, paymentRequired, body } for the caller to relay.
  */
-export async function forward({ method, url, body, env = process.env, clientIp }) {
+export async function forward({ method, url, body, env = process.env, clientIp, cookie }) {
   const backendUrl = env.BACKEND_API_URL;
   // MASTER_API_KEY is the documented name; API_KEY is accepted too (that is what Vercel has it saved as).
   const apiKey = env.MASTER_API_KEY || env.API_KEY;
@@ -37,13 +54,17 @@ export async function forward({ method, url, body, env = process.env, clientIp }
 
   const path = backendPath(url);
   if (path === null) return json(400, { error: "invalid_path" });
-  if (!isAllowed(method, path)) return json(404, { error: "not_found" });
+  if (!isAllowed(method, path) && !isAdminAllowed(method, path)) return json(404, { error: "not_found" });
 
   const target = new URL(path, backendUrl);
   target.search = new URL(url, "https://jellyswarm.invalid").search;
   const headers = { "x-api-key": apiKey, accept: "application/json" };
   if (typeof clientIp === "string" && isIP(clientIp.trim())) {
     headers["x-jellyswarm-client-ip"] = clientIp.trim();
+  }
+  if (path.startsWith("/admin/")) {
+    const sessionCookie = adminCookieHeader(cookie);
+    if (sessionCookie) headers.cookie = sessionCookie;
   }
   let payload;
   if (method !== "GET") {
@@ -57,6 +78,7 @@ export async function forward({ method, url, body, env = process.env, clientIp }
       status: upstream.status,
       contentType: upstream.headers.get("content-type") ?? "application/json",
       paymentRequired: upstream.headers.get("payment-required"),
+      setCookie: path.startsWith("/admin/") ? upstream.headers.get("set-cookie") : null,
       body: await upstream.text(),
     };
   } catch {
@@ -65,5 +87,5 @@ export async function forward({ method, url, body, env = process.env, clientIp }
 }
 
 function json(status, value) {
-  return { status, contentType: "application/json", paymentRequired: null, body: JSON.stringify(value) };
+  return { status, contentType: "application/json", paymentRequired: null, setCookie: null, body: JSON.stringify(value) };
 }

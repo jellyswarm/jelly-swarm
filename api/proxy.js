@@ -14,8 +14,9 @@ export function originalUrl(reqUrl) {
 export default async function handler(req, res) {
   const rawClientIp = req.headers["x-forwarded-for"];
   const clientIp = typeof rawClientIp === "string" ? rawClientIp.split(",", 1)[0].trim() : undefined;
-  const result = await forward({ method: req.method, url: originalUrl(req.url), body: req.body, clientIp });
+  const result = await forward({ method: req.method, url: originalUrl(req.url), body: req.body, clientIp, cookie: req.headers.cookie });
   if (result.paymentRequired) res.setHeader("PAYMENT-REQUIRED", result.paymentRequired);
+  if (result.setCookie) res.setHeader("Set-Cookie", result.setCookie);
   res.setHeader("content-type", result.contentType);
   res.setHeader("cache-control", "no-store");
   return res.status(result.status).send(result.body);

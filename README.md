@@ -48,7 +48,7 @@ Jobs run on Elysium and are paid upfront in USDC. Choose either the x402 payment
 
 ### A real job, from quote to settlement
 
-We ran a one-agent job against the production API and paid for it with 0.30 USDC on Elysium. The job completed, returned its result, and settled the full payment to the configured treasury. The [live-run record](https://github.com/jellyswarm/jelly-swarm/blob/main/live-run-0xaab237d9a65760c1a254c83a5d0a03bb01ae832b5eef40806b7769d462025340.yaml) includes the API requests and responses, transaction hashes, and what the run verified. Direct payment and refund payouts were not tested in that run.
+We ran a one-agent job against the production API and paid for it with 0.30 USDC on Elysium. The job completed, returned its result, and settled the full payment to the configured treasury. The [live-run record](https://github.com/jellyswarm/jelly-swarm/blob/main/live-run-0xaab237d9a65760c1a254c83a5d0a03bb01ae832b5eef40806b7769d462025340.yaml) includes the API requests and responses, transaction hashes, and what the run verified.
 
 ## Run the frontend locally
 

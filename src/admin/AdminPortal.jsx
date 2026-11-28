@@ -5,6 +5,7 @@ import { WagmiProvider, useAccount, useSwitchChain } from "wagmi";
 import { signTypedData } from "wagmi/actions";
 import { config, elysium, rkTheme } from "../app/wallet.js";
 import { formatUsdc, short } from "../app/lib.js";
+import "@rainbow-me/rainbowkit/styles.css";
 import "../styles/site.css";
 import "../styles/admin.css";
 

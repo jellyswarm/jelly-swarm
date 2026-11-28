@@ -6,7 +6,7 @@ import { signTypedData } from "wagmi/actions";
 import { config, elysium, rkTheme } from "../app/wallet.js";
 import { formatUsdc, short } from "../app/lib.js";
 import "../styles/site.css";
-import "./admin.css";
+import "../styles/admin.css";
 
 const queryClient = new QueryClient();
 

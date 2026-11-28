@@ -40,6 +40,9 @@ jobs:
         env:
           DATABASE_URL: postgres://jellyswarm:jellyswarm@127.0.0.1:5432/jellyswarm_test
           RUN_DB_TESTS: "1"
+      - name: Test server-side API proxy
+        working-directory: .
+        run: bun test ./api
       - run: bun run check
       - run: bun audit
       - name: Build production image
